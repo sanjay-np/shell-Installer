@@ -6,8 +6,9 @@ An elegant, robust, and completely idempotent Bash script (`install.sh`) to boot
 
 ## 🚀 Features
 
+*   **Interactive Confirmation Prompts**: Prompts the user individually before installing or upgrading any system package, Zsh plugin, dotfiles configuration folder, or custom command. Prompts state `(currently installed)` for existing software so you can choose whether to skip or re-install/upgrade.
 *   **Intelligent OS Detection**: Automatically adapts commands for macOS (Homebrew Cask/Formulas), Ubuntu (Apt-get / Snaps), and Arch Linux (Pacman).
-*   **Idempotent Installation**: Automatically checks if a package is already installed before calling the package manager, avoiding redundant installation steps and noisy warning messages.
+*   **Idempotent Installation**: Ensures configuration alterations remain clean and block-contained, preventing multiple runs from cluttering configuration files.
 *   **Zsh Completion & Highlight Custom Plugins**: Clones and manages plugins directly from GitHub to a consistent location (`~/.zsh/plugins/`) so they work identically across all your machines:
     *   [zsh-autosuggestions](https://github.com/zsh-users/zsh-autosuggestions)
     *   [zsh-syntax-highlighting](https://github.com/zsh-users/zsh-syntax-highlighting)

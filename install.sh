@@ -42,6 +42,19 @@ print_header() {
   echo ""
 }
 
+# Ask for user confirmation
+confirm() {
+  local prompt_msg="$1"
+  local response
+  echo -ne "${YELLOW}${BOLD}[CONFIRM]${NC} ${prompt_msg} (y/N): "
+  read -r response
+  if [[ "$response" =~ ^[Yy]$ ]]; then
+    return 0
+  else
+    return 1
+  fi
+}
+
 # Detect operating system
 detect_os() {
   if [[ "$OSTYPE" == "darwin"* ]]; then
@@ -64,43 +77,55 @@ detect_os() {
 install_macos() {
   log_info "Checking package requirements on macOS..."
   if ! command -v brew >/dev/null 2>&1; then
-    log_info "Homebrew not found. Installing Homebrew..."
-    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-
-    # Configure Homebrew path dynamically for current session
-    if [[ -f /opt/homebrew/bin/brew ]]; then
-      eval "$(/opt/homebrew/bin/brew shellenv)"
-    elif [[ -f /usr/local/bin/brew ]]; then
-      eval "$(/usr/local/bin/brew shellenv)"
+    if confirm "Homebrew not found. Install Homebrew?"; then
+      log_info "Installing Homebrew..."
+      /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+      
+      # Configure Homebrew path dynamically for current session
+      if [[ -f /opt/homebrew/bin/brew ]]; then
+        eval "$(/opt/homebrew/bin/brew shellenv)"
+      elif [[ -f /usr/local/bin/brew ]]; then
+        eval "$(/usr/local/bin/brew shellenv)"
+      fi
+    else
+      log_warning "Homebrew installation skipped. Proceeding without Homebrew..."
+      echo ""
     fi
   else
     log_success "Homebrew is already installed."
   fi
 
-  local pkgs_to_install=()
+  # Skip Homebrew auto-updates for faster individual package installation
+  export HOMEBREW_NO_AUTO_UPDATE=1
+
+  log_info "Checking packages for installation..."
   for pkg in zsh zoxide fzf git curl neovim tmux starship; do
+    local status=""
     local cmd="$pkg"
     if [ "$pkg" = "neovim" ]; then
       cmd="nvim"
     fi
-    if ! command -v "$cmd" >/dev/null 2>&1; then
-      pkgs_to_install+=("$pkg")
+    if command -v "$cmd" >/dev/null 2>&1; then
+      status=" (currently installed)"
+    fi
+    if confirm "Install/upgrade package '$pkg'$status?"; then
+      log_info "Installing/upgrading '$pkg'..."
+      brew install "$pkg"
+    else
+      log_info "Skipped package '$pkg'."
     fi
   done
 
-  if [ ${#pkgs_to_install[@]} -ne 0 ]; then
-    log_info "Installing missing packages via Homebrew: ${pkgs_to_install[*]}..."
-    brew install "${pkgs_to_install[@]}"
-  else
-    log_success "All packages (zsh, zoxide, fzf, git, curl, neovim, tmux, starship) are already installed."
-  fi
-
   # Check and install Ghostty terminal (Homebrew Cask)
-  if ! command -v ghostty >/dev/null 2>&1 && [ ! -d "/Applications/Ghostty.app" ]; then
-    log_info "Installing Ghostty terminal via Homebrew Cask..."
+  local ghostty_status=""
+  if command -v ghostty >/dev/null 2>&1 || [ -d "/Applications/Ghostty.app" ]; then
+    ghostty_status=" (currently installed)"
+  fi
+  if confirm "Install/upgrade Ghostty terminal$ghostty_status?"; then
+    log_info "Installing/upgrading Ghostty..."
     brew install --cask ghostty
   else
-    log_success "Ghostty terminal is already installed."
+    log_info "Skipped Ghostty terminal."
   fi
 }
 
@@ -109,26 +134,29 @@ install_ubuntu() {
   log_info "Updating package lists..."
   sudo apt-get update -y
 
-  local pkgs_to_install=()
   for pkg in zsh fzf git curl neovim tmux; do
+    local status=""
     local cmd="$pkg"
     if [ "$pkg" = "neovim" ]; then
       cmd="nvim"
     fi
-    if ! command -v "$cmd" >/dev/null 2>&1; then
-      pkgs_to_install+=("$pkg")
+    if command -v "$cmd" >/dev/null 2>&1; then
+      status=" (currently installed)"
+    fi
+    if confirm "Install/upgrade package '$pkg'$status?"; then
+      log_info "Installing/upgrading '$pkg'..."
+      sudo apt-get install -y "$pkg"
+    else
+      log_info "Skipped package '$pkg'."
     fi
   done
 
-  if [ ${#pkgs_to_install[@]} -ne 0 ]; then
-    log_info "Installing missing packages via apt-get: ${pkgs_to_install[*]}..."
-    sudo apt-get install -y "${pkgs_to_install[@]}"
-  else
-    log_success "Core packages (zsh, fzf, git, curl, neovim, tmux) are already installed."
-  fi
-
   # Install zoxide
-  if ! command -v zoxide >/dev/null 2>&1; then
+  local zoxide_status=""
+  if command -v zoxide >/dev/null 2>&1; then
+    zoxide_status=" (currently installed)"
+  fi
+  if confirm "Install/upgrade zoxide$zoxide_status?"; then
     if apt-cache show zoxide >/dev/null 2>&1; then
       log_info "Installing zoxide via apt-get..."
       sudo apt-get install -y zoxide
@@ -139,19 +167,27 @@ install_ubuntu() {
       export PATH="$HOME/.local/bin:$PATH"
     fi
   else
-    log_success "zoxide is already installed."
+    log_info "Skipped zoxide."
   fi
 
   # Install starship
-  if ! command -v starship >/dev/null 2>&1; then
+  local starship_status=""
+  if command -v starship >/dev/null 2>&1; then
+    starship_status=" (currently installed)"
+  fi
+  if confirm "Install/upgrade starship$starship_status?"; then
     log_info "Installing starship prompt..."
     curl -sS https://starship.rs/install.sh | sh -s -- --yes
   else
-    log_success "starship is already installed."
+    log_info "Skipped starship."
   fi
 
   # Install Ghostty terminal (Snap / apt)
-  if ! command -v ghostty >/dev/null 2>&1; then
+  local ghostty_status=""
+  if command -v ghostty >/dev/null 2>&1; then
+    ghostty_status=" (currently installed)"
+  fi
+  if confirm "Install/upgrade Ghostty terminal$ghostty_status?"; then
     if command -v snap >/dev/null 2>&1; then
       log_info "Installing Ghostty terminal via snap..."
       sudo snap install ghostty
@@ -163,29 +199,28 @@ install_ubuntu() {
       echo ""
     fi
   else
-    log_success "Ghostty terminal is already installed."
+    log_info "Skipped Ghostty terminal."
   fi
 }
 
 # Arch Linux Installation Flow
 install_arch() {
-  local pkgs_to_install=()
   for pkg in zsh zoxide fzf git curl neovim tmux starship ghostty; do
+    local status=""
     local cmd="$pkg"
     if [ "$pkg" = "neovim" ]; then
       cmd="nvim"
     fi
-    if ! command -v "$cmd" >/dev/null 2>&1; then
-      pkgs_to_install+=("$pkg")
+    if command -v "$cmd" >/dev/null 2>&1; then
+      status=" (currently installed)"
+    fi
+    if confirm "Install/upgrade package '$pkg'$status?"; then
+      log_info "Installing/upgrading '$pkg'..."
+      sudo pacman -Sy --needed --noconfirm "$pkg"
+    else
+      log_info "Skipped package '$pkg'."
     fi
   done
-
-  if [ ${#pkgs_to_install[@]} -ne 0 ]; then
-    log_info "Installing missing packages via pacman: ${pkgs_to_install[*]}..."
-    sudo pacman -Sy --needed --noconfirm "${pkgs_to_install[@]}"
-  else
-    log_success "All packages (zsh, zoxide, fzf, git, curl, neovim, tmux, starship, ghostty) are already installed."
-  fi
 }
 
 # Clone Zsh Plugins from GitHub
@@ -195,30 +230,56 @@ setup_plugins() {
   mkdir -p "$plugin_dir"
 
   # zsh-autosuggestions
-  if [ ! -d "$plugin_dir/zsh-autosuggestions" ]; then
-    log_info "Cloning zsh-autosuggestions..."
-    git clone https://github.com/zsh-users/zsh-autosuggestions "$plugin_dir/zsh-autosuggestions"
-  else
-    log_success "zsh-autosuggestions is already cloned. Pulling latest updates..."
-    git -C "$plugin_dir/zsh-autosuggestions" pull
+  local status_autosuggestions=""
+  if [ -d "$plugin_dir/zsh-autosuggestions" ]; then
+    status_autosuggestions=" (currently installed)"
   fi
+  if confirm "Setup/update Zsh plugin 'zsh-autosuggestions'$status_autosuggestions?"; then
+    if [ ! -d "$plugin_dir/zsh-autosuggestions" ]; then
+      log_info "Cloning zsh-autosuggestions..."
+      git clone https://github.com/zsh-users/zsh-autosuggestions "$plugin_dir/zsh-autosuggestions"
+    else
+      log_success "zsh-autosuggestions is already cloned. Pulling latest updates..."
+      git -C "$plugin_dir/zsh-autosuggestions" pull
+    fi
+  else
+    log_info "Skipped 'zsh-autosuggestions' plugin."
+  fi
+  echo ""
 
   # zsh-syntax-highlighting
-  if [ ! -d "$plugin_dir/zsh-syntax-highlighting" ]; then
-    log_info "Cloning zsh-syntax-highlighting..."
-    git clone https://github.com/zsh-users/zsh-syntax-highlighting "$plugin_dir/zsh-syntax-highlighting"
-  else
-    log_success "zsh-syntax-highlighting is already cloned. Pulling latest updates..."
-    git -C "$plugin_dir/zsh-syntax-highlighting" pull
+  local status_syntax=""
+  if [ -d "$plugin_dir/zsh-syntax-highlighting" ]; then
+    status_syntax=" (currently installed)"
   fi
+  if confirm "Setup/update Zsh plugin 'zsh-syntax-highlighting'$status_syntax?"; then
+    if [ ! -d "$plugin_dir/zsh-syntax-highlighting" ]; then
+      log_info "Cloning zsh-syntax-highlighting..."
+      git clone https://github.com/zsh-users/zsh-syntax-highlighting "$plugin_dir/zsh-syntax-highlighting"
+    else
+      log_success "zsh-syntax-highlighting is already cloned. Pulling latest updates..."
+      git -C "$plugin_dir/zsh-syntax-highlighting" pull
+    fi
+  else
+    log_info "Skipped 'zsh-syntax-highlighting' plugin."
+  fi
+  echo ""
 
   # fzf-tab
-  if [ ! -d "$plugin_dir/fzf-tab" ]; then
-    log_info "Cloning fzf-tab..."
-    git clone https://github.com/Aloxaf/fzf-tab "$plugin_dir/fzf-tab"
+  local status_fzftab=""
+  if [ -d "$plugin_dir/fzf-tab" ]; then
+    status_fzftab=" (currently installed)"
+  fi
+  if confirm "Setup/update Zsh plugin 'fzf-tab'$status_fzftab?"; then
+    if [ ! -d "$plugin_dir/fzf-tab" ]; then
+      log_info "Cloning fzf-tab..."
+      git clone https://github.com/Aloxaf/fzf-tab "$plugin_dir/fzf-tab"
+    else
+      log_success "fzf-tab is already cloned. Pulling latest updates..."
+      git -C "$plugin_dir/fzf-tab" pull
+    fi
   else
-    log_success "fzf-tab is already cloned. Pulling latest updates..."
-    git -C "$plugin_dir/fzf-tab" pull
+    log_info "Skipped 'fzf-tab' plugin."
   fi
 }
 
@@ -341,57 +402,68 @@ change_shell() {
 
 # Clone dotfiles repo and setup neovim + ghostty configs
 setup_dotfiles() {
-  log_info "Setting up Neovim and Ghostty configurations from dotfiles repository..."
-  local config_dir="$HOME/.config"
-  mkdir -p "$config_dir"
+  local has_dotfiles=""
+  if [ -d "$HOME/.config/nvim" ] || [ -d "$HOME/.config/ghostty" ]; then
+    has_dotfiles=" (configs exist)"
+  fi
+  if confirm "Clone dotfiles repository and configure Neovim/Ghostty$has_dotfiles?"; then
+    log_info "Setting up Neovim and Ghostty configurations from dotfiles repository..."
+    local config_dir="$HOME/.config"
+    mkdir -p "$config_dir"
 
-  local temp_dir
-  temp_dir=$(mktemp -d)
+    local temp_dir
+    temp_dir=$(mktemp -d)
 
-  log_info "Cloning dotfiles repository..."
-  if git clone https://github.com/sanjay-np/dotfiles "$temp_dir" >/dev/null 2>&1; then
-    
-    # Setup Neovim Config
-    if [ -d "$temp_dir/nvim" ]; then
-      if [ -d "$config_dir/nvim" ]; then
-        local nvim_backup="${config_dir}/nvim.bak_$(date +%Y%m%d_%H%M%S)"
-        log_info "Existing Neovim configuration found. Backing up to $nvim_backup..."
-        mv "$config_dir/nvim" "$nvim_backup"
+    log_info "Cloning dotfiles repository..."
+    if git clone https://github.com/sanjay-np/dotfiles "$temp_dir" >/dev/null 2>&1; then
+      
+      # Setup Neovim Config
+      if [ -d "$temp_dir/nvim" ]; then
+        if [ -d "$config_dir/nvim" ]; then
+          local nvim_backup="${config_dir}/nvim.bak_$(date +%Y%m%d_%H%M%S)"
+          log_info "Existing Neovim configuration found. Backing up to $nvim_backup..."
+          mv "$config_dir/nvim" "$nvim_backup"
+        fi
+        log_info "Copying Neovim configuration to $config_dir/nvim..."
+        cp -R "$temp_dir/nvim" "$config_dir/nvim"
+        log_success "Neovim configuration successfully set up!"
+      else
+        log_warning "No 'nvim' directory found in dotfiles repository."
+        echo ""
       fi
-      log_info "Copying Neovim configuration to $config_dir/nvim..."
-      cp -R "$temp_dir/nvim" "$config_dir/nvim"
-      log_success "Neovim configuration successfully set up!"
-    else
-      log_warning "No 'nvim' directory found in dotfiles repository."
-      echo ""
-    fi
 
-    # Setup Ghostty Config
-    if [ -d "$temp_dir/ghostty" ]; then
-      if [ -d "$config_dir/ghostty" ]; then
-        local ghostty_backup="${config_dir}/ghostty.bak_$(date +%Y%m%d_%H%M%S)"
-        log_info "Existing Ghostty configuration found. Backing up to $ghostty_backup..."
-        mv "$config_dir/ghostty" "$ghostty_backup"
+      # Setup Ghostty Config
+      if [ -d "$temp_dir/ghostty" ]; then
+        if [ -d "$config_dir/ghostty" ]; then
+          local ghostty_backup="${config_dir}/ghostty.bak_$(date +%Y%m%d_%H%M%S)"
+          log_info "Existing Ghostty configuration found. Backing up to $ghostty_backup..."
+          mv "$config_dir/ghostty" "$ghostty_backup"
+        fi
+        log_info "Copying Ghostty configuration to $config_dir/ghostty..."
+        cp -R "$temp_dir/ghostty" "$config_dir/ghostty"
+        log_success "Ghostty configuration successfully set up!"
+      else
+        log_warning "No 'ghostty' directory found in dotfiles repository."
+        echo ""
       fi
-      log_info "Copying Ghostty configuration to $config_dir/ghostty..."
-      cp -R "$temp_dir/ghostty" "$config_dir/ghostty"
-      log_success "Ghostty configuration successfully set up!"
-    else
-      log_warning "No 'ghostty' directory found in dotfiles repository."
-      echo ""
-    fi
 
-    rm -rf "$temp_dir"
+      rm -rf "$temp_dir"
+    else
+      log_error "Failed to clone dotfiles repository. Skipping config setups."
+      rm -rf "$temp_dir"
+    fi
   else
-    log_error "Failed to clone dotfiles repository. Skipping config setups."
-    rm -rf "$temp_dir"
+    log_info "Skipped dotfiles configuration setup."
   fi
 }
 
 # Install opencode.ai via curl script
 install_opencode() {
-  log_info "Checking opencode.ai installation..."
-  if ! command -v opencode >/dev/null 2>&1; then
+  local status=""
+  if command -v opencode >/dev/null 2>&1; then
+    status=" (currently installed)"
+  fi
+  if confirm "Install/upgrade opencode.ai$status?"; then
     log_info "Installing opencode.ai via official curl script..."
     if curl -fsSL https://opencode.ai/install | bash; then
       log_success "opencode.ai successfully installed!"
@@ -399,7 +471,7 @@ install_opencode() {
       log_error "Failed to install opencode.ai."
     fi
   else
-    log_success "opencode.ai is already installed."
+    log_info "Skipped opencode.ai."
   fi
 }
 
@@ -429,10 +501,18 @@ main() {
   setup_plugins
   echo ""
 
-  configure_zshrc
+  if confirm "Configure Zsh configurations in .zshrc?"; then
+    configure_zshrc
+  else
+    log_info "Skipped .zshrc configuration."
+  fi
   echo ""
 
-  change_shell
+  if confirm "Change default login shell to Zsh?"; then
+    change_shell
+  else
+    log_info "Skipped default login shell change."
+  fi
   echo ""
 
   setup_dotfiles
