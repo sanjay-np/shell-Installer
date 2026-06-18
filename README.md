@@ -34,6 +34,20 @@ An elegant, robust, and completely idempotent Bash script (`install.sh`) to boot
 | **Tmux** | Terminal multiplexer | Homebrew | Apt | Pacman |
 | **Ghostty** | GPU terminal | Homebrew Cask | Snap / Apt | Pacman |
 | **OpenCode.ai** | AI integration | Curl | Curl | Curl |
+| **Git** | Version control | Homebrew | Apt | Pacman |
+| **Curl** | Data transfer tool | Homebrew | Apt | Pacman |
+| **Eza** | ls alternative | Homebrew | Snap / Apt | Pacman |
+| **Bat** | cat alternative | Homebrew | Apt | Pacman |
+| **Fd** | find alternative | Homebrew | Apt | Pacman |
+| **Ripgrep** | grep alternative | Homebrew | Apt | Pacman |
+| **Btop** | System monitor | Homebrew | Apt | Pacman |
+| **Lazygit** | Git TUI | Homebrew | Snap / Apt | Pacman |
+| **Tldr** | Cheat sheets | Homebrew | Apt | Pacman |
+| **GitHub CLI (gh)** | GitHub command line | Homebrew | Apt | Pacman (github-cli) |
+| **Direnv** | Env switcher | Homebrew | Apt | Pacman |
+| **Dust** | du alternative | Homebrew | Snap / Apt | Pacman |
+| **Fastfetch** | System info fetcher | Homebrew | Snap / Apt | Pacman |
+| **Ncdu** | Disk usage analyzer | Homebrew | Apt | Pacman |
 
 ---
 
@@ -77,7 +91,9 @@ fi
 
 # Setup Zoxide
 if command -v zoxide >/dev/null 2>&1; then
+  # ---- Zoxide (better cd) ----
   eval "$(zoxide init zsh)"
+  alias cd="z"
 fi
 
 # Setup Fzf
@@ -92,6 +108,17 @@ fi
 # Setup Starship Prompt
 if command -v starship >/dev/null 2>&1; then
   eval "$(starship init zsh)"
+fi
+
+# Setup Direnv
+if command -v direnv >/dev/null 2>&1; then
+  eval "$(direnv hook zsh)"
+fi
+
+# Setup Eza Aliases
+if command -v eza >/dev/null 2>&1; then
+  # ---- Eza (better ls) -----
+  alias ls="eza --color=always --long --git --no-filesize --icons=always --no-time --no-user --no-permissions --tree --level=1"
 fi
 # <<< installer-setup end <<<
 ```

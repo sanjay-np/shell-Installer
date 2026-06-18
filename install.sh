@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 
-# Cross-Platform Shell Installer Script
+# Cross-Platform Premium Shell Installer TUI
 # Configures a premium Zsh environment with Zoxide, Fzf, zsh-autosuggestions, and zsh-syntax-highlighting.
 # Supported OSs: macOS, Ubuntu/Debian, Arch Linux.
+# Runs in pure Bash using ANSI escape codes and Unicode box-drawing.
 
 # Exit immediately if a pipeline returns a non-zero status
 set -o pipefail
@@ -17,7 +18,18 @@ CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m' # No Color
 
-# Logging functions
+# Premium TUI theme colors
+TUI_TITLE='\033[1;35m'
+TUI_SUBTITLE='\033[1;36m'
+TUI_BORDER='\033[36m'
+TUI_HIGHLIGHT='\033[1;36m'
+TUI_CHECKED='\033[1;32m'
+TUI_UNCHECKED='\033[90m'
+TUI_SUCCESS='\033[1;32m'
+TUI_FAILED='\033[1;31m'
+TUI_DIM='\033[90m'
+
+# Logging functions (used during installation tasks)
 log_info() {
   echo -e "${BLUE}${BOLD}[INFO]${NC} $1"
 }
@@ -34,26 +46,46 @@ log_error() {
   echo -e "${RED}${BOLD}[ERROR]${NC} $1"
 }
 
-# Print beautiful header
-print_header() {
-  echo -e "${MAGENTA}${BOLD}==================================================${NC}"
-  echo -e "${CYAN}${BOLD}       PREMIUM SHELL SETUP & INSTALLER            ${NC}"
-  echo -e "${MAGENTA}${BOLD}==================================================${NC}"
-  echo ""
-}
-
-# Ask for user confirmation
-confirm() {
-  local prompt_msg="$1"
-  local response
-  echo -ne "${YELLOW}${BOLD}[CONFIRM]${NC} ${prompt_msg} (y/N): "
-  read -r response
-  if [[ "$response" =~ ^[Yy]$ ]]; then
-    return 0
+# Detect UTF-8 locale for premium Unicode symbol support
+detect_unicode() {
+  if [[ "$LC_ALL" == *"UTF-8"* || "$LC_CTYPE" == *"UTF-8"* || "$LANG" == *"UTF-8"* ]]; then
+    USE_UNICODE=true
   else
-    return 1
+    USE_UNICODE=false
   fi
 }
+
+detect_unicode
+
+if [ "$USE_UNICODE" = true ]; then
+  BOX_TL="┌"
+  BOX_TR="┐"
+  BOX_BL="└"
+  BOX_BR="┘"
+  BOX_H="─"
+  BOX_V="│"
+  BOX_ML="├"
+  BOX_MR="┤"
+  SYM_CHECKED="✔"
+  SYM_UNCHECKED=" "
+  SYM_ARROW="▶"
+  SYM_SUCCESS="✔"
+  SYM_FAILED="✘"
+else
+  BOX_TL="+"
+  BOX_TR="+"
+  BOX_BL="+"
+  BOX_BR="+"
+  BOX_H="-"
+  BOX_V="|"
+  BOX_ML="+"
+  BOX_MR="+"
+  SYM_CHECKED="x"
+  SYM_UNCHECKED=" "
+  SYM_ARROW=">"
+  SYM_SUCCESS="OK"
+  SYM_FAILED="ERR"
+fi
 
 # Detect operating system
 detect_os() {
@@ -73,217 +105,637 @@ detect_os() {
   fi
 }
 
-# macOS Installation Flow
-install_macos() {
-  log_info "Checking package requirements on macOS..."
-  if ! command -v brew >/dev/null 2>&1; then
-    if confirm "Homebrew not found. Install Homebrew?"; then
-      log_info "Installing Homebrew..."
-      /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-      
-      # Configure Homebrew path dynamically for current session
-      if [[ -f /opt/homebrew/bin/brew ]]; then
-        eval "$(/opt/homebrew/bin/brew shellenv)"
-      elif [[ -f /usr/local/bin/brew ]]; then
-        eval "$(/usr/local/bin/brew shellenv)"
-      fi
-    else
-      log_warning "Homebrew installation skipped. Proceeding without Homebrew..."
-      echo ""
-    fi
-  else
-    log_success "Homebrew is already installed."
-  fi
-
-  # Skip Homebrew auto-updates for faster individual package installation
-  export HOMEBREW_NO_AUTO_UPDATE=1
-
-  log_info "Checking packages for installation..."
-  for pkg in zsh zoxide fzf git curl neovim tmux starship; do
-    local status=""
-    local cmd="$pkg"
-    if [ "$pkg" = "neovim" ]; then
-      cmd="nvim"
-    fi
-    if command -v "$cmd" >/dev/null 2>&1; then
-      status=" (currently installed)"
-    fi
-    if confirm "Install/upgrade package '$pkg'$status?"; then
-      log_info "Installing/upgrading '$pkg'..."
-      brew install "$pkg"
-    else
-      log_info "Skipped package '$pkg'."
-    fi
-  done
-
-  # Check and install Ghostty terminal (Homebrew Cask)
-  local ghostty_status=""
-  if command -v ghostty >/dev/null 2>&1 || [ -d "/Applications/Ghostty.app" ]; then
-    ghostty_status=" (currently installed)"
-  fi
-  if confirm "Install/upgrade Ghostty terminal$ghostty_status?"; then
-    log_info "Installing/upgrading Ghostty..."
-    brew install --cask ghostty
-  else
-    log_info "Skipped Ghostty terminal."
+# Check terminal size
+check_terminal_size() {
+  local cols
+  local rows
+  cols=$(tput cols 2>/dev/null || echo 80)
+  rows=$(tput lines 2>/dev/null || echo 24)
+  if [ "$cols" -lt 76 ] || [ "$rows" -lt 18 ]; then
+    log_warning "Your terminal window is small ($cols x $rows). Premium TUI works best at 76x18 or larger."
+    echo -ne "${YELLOW}${BOLD}[PROMPT]${NC} Press Enter to continue anyway... "
+    read -r
   fi
 }
 
-# Ubuntu/Debian Installation Flow
-install_ubuntu() {
-  log_info "Updating package lists..."
-  sudo apt-get update -y
+# TUI Cleanup Trap Function
+cleanup_tui() {
+  stty echo icanon 2>/dev/null
+  printf "\e[?25h" # Show cursor
+  if [ -n "$SUDO_PID" ] && kill -0 "$SUDO_PID" 2>/dev/null; then
+    kill "$SUDO_PID" 2>/dev/null
+  fi
+}
 
-  for pkg in zsh fzf git curl neovim tmux; do
-    local status=""
-    local cmd="$pkg"
-    if [ "$pkg" = "neovim" ]; then
-      cmd="nvim"
+tui_exit_handler() {
+  clear 2>/dev/null
+  cleanup_tui
+  echo -e "\n${RED}${BOLD}[ERROR]${NC} Setup cancelled or interrupted."
+  exit 1
+}
+trap tui_exit_handler INT TERM
+trap cleanup_tui EXIT
+
+# Setup Sudo credentials before launching the TUI
+setup_sudo() {
+  if [[ "$OS" == "macos" ]]; then
+    log_info "To ensure a smooth setup, the installer may request your password for administrative tasks."
+  else
+    log_info "This installer requires administrative privileges to install system packages."
+  fi
+  echo -ne "${YELLOW}${BOLD}[PROMPT]${NC} Press any key to authenticate sudo... "
+  read -n 1 -s
+  echo ""
+  if sudo -v; then
+    # Keep-alive: update existing sudo time stamp if set, every 60 seconds
+    while true; do sudo -n true; sleep 60; kill -0 "$$" || exit; done 2>/dev/null &
+    SUDO_PID=$!
+    log_success "Sudo authenticated successfully!"
+    sleep 1
+  else
+    log_warning "Sudo authentication failed. Steps requiring admin privileges may fail."
+    sleep 2
+  fi
+}
+
+# Check if a package is installed
+is_pkg_installed() {
+  local pkg="$1"
+  local cmd="$pkg"
+  
+  case "$pkg" in
+    neovim)   cmd="nvim" ;;
+    ripgrep)  cmd="rg" ;;
+    fd)
+      if command -v fdfind >/dev/null 2>&1; then return 0; fi
+      cmd="fd"
+      ;;
+    bat)
+      if command -v batcat >/dev/null 2>&1; then return 0; fi
+      cmd="bat"
+      ;;
+    ghostty)
+      if [[ "$OS" == "macos" ]]; then
+        if command -v ghostty >/dev/null 2>&1 || [ -d "/Applications/Ghostty.app" ]; then
+          return 0
+        fi
+      else
+        if command -v ghostty >/dev/null 2>&1; then
+          return 0
+        fi
+      fi
+      return 1
+      ;;
+  esac
+  
+  if command -v "$cmd" >/dev/null 2>&1; then
+    return 0
+  fi
+  return 1
+}
+
+# Packages Configuration
+packages=(
+  "zsh" "zoxide" "fzf" "git" "curl" "neovim" "tmux" "starship" "ghostty"
+  "eza" "bat" "fd" "ripgrep" "btop" "lazygit" "tldr" "gh" "direnv"
+  "dust" "fastfetch" "ncdu"
+)
+package_labels=(
+  "Zsh" "Zoxide" "Fzf" "Git" "Curl" "Neovim" "Tmux" "Starship Prompt" "Ghostty Terminal"
+  "Eza (ls alternative)" "Bat (cat alternative)" "Fd (find alternative)" "Ripgrep (grep alternative)"
+  "Btop system monitor" "Lazygit TUI" "Tldr cheat sheets" "GitHub CLI" "Direnv env switcher"
+  "Dust (du alternative)" "Fastfetch system info" "Ncdu disk usage analyzer"
+)
+package_installed=()
+package_selected=()
+
+# Configuration Tweaks
+configs=("zshrc" "shell" "dotfiles" "opencode")
+config_labels=(
+  "Configure Zsh configurations in .zshrc"
+  "Change default login shell to Zsh"
+  "Clone dotfiles repository & configure Neovim/Ghostty"
+  "Install/upgrade opencode.ai"
+)
+config_selected=(1 1 1 1)
+
+# Raw Key Reader (POSIX stty-compliant, compatible with Bash 3.2+)
+read_key() {
+  local key
+  local next
+  
+  # Set terminal to raw blocking mode (wait for at least 1 character)
+  stty -echo -icanon min 1 time 0 2>/dev/null
+  IFS= read -r -n 1 key
+  
+  # If escape character, read any immediately following characters from terminal input queue
+  if [[ "$key" == $'\e' ]]; then
+    # Switch to raw non-blocking mode (return immediately if queue is empty)
+    stty -echo -icanon min 0 time 0 2>/dev/null
+    IFS= read -r -n 1 next
+    if [ -n "$next" ]; then
+      key="$key$next"
+      IFS= read -r -n 1 next
+      if [ -n "$next" ]; then
+        key="$key$next"
+      fi
     fi
-    if command -v "$cmd" >/dev/null 2>&1; then
-      status=" (currently installed)"
-    fi
-    if confirm "Install/upgrade package '$pkg'$status?"; then
-      log_info "Installing/upgrading '$pkg'..."
-      sudo apt-get install -y "$pkg"
+  fi
+  
+  echo -n "$key"
+}
+
+# TUI Drawer Helpers
+draw_header() {
+  local title="$1"
+  local subtitle="$2"
+  
+  # Top border
+  printf "%b%s" "$TUI_BORDER" "$BOX_TL"
+  for ((i=0; i<70; i++)); do printf "%s" "$BOX_H"; done
+  printf "%s%b\e[K\n" "$BOX_TR" "$NC"
+  
+  # Title
+  local pad_t=$(( (70 - ${#title}) / 2 ))
+  printf "%b%s%b" "$TUI_BORDER" "$BOX_V" "$NC"
+  for ((i=0; i<pad_t; i++)); do printf " "; done
+  printf "%b%s%b" "$TUI_TITLE" "$title" "$NC"
+  for ((i=0; i<70 - pad_t - ${#title}; i++)); do printf " "; done
+  printf "%b%s%b\e[K\n" "$TUI_BORDER" "$BOX_V" "$NC"
+  
+  # Subtitle
+  if [ -n "$subtitle" ]; then
+    local pad_s=$(( (70 - ${#subtitle}) / 2 ))
+    printf "%b%s%b" "$TUI_BORDER" "$BOX_V" "$NC"
+    for ((i=0; i<pad_s; i++)); do printf " "; done
+    printf "%b%s%b" "$TUI_SUBTITLE" "$subtitle" "$NC"
+    for ((i=0; i<70 - pad_s - ${#subtitle}; i++)); do printf " "; done
+    printf "%b%s%b\e[K\n" "$TUI_BORDER" "$BOX_V" "$NC"
+  fi
+  
+  # Divider
+  printf "%b%s" "$TUI_BORDER" "$BOX_ML"
+  for ((i=0; i<70; i++)); do printf "%s" "$BOX_H"; done
+  printf "%s%b\e[K\n" "$BOX_MR" "$NC"
+}
+
+draw_footer() {
+  printf "%b%s" "$TUI_BORDER" "$BOX_BL"
+  for ((i=0; i<70; i++)); do printf "%s" "$BOX_H"; done
+  printf "%s%b\e[K\n" "$BOX_BR" "$NC"
+}
+
+print_menu_line() {
+  local is_cursor=$1 is_selected=$2 label=$3 status=$4
+  
+  local cursor_sym="  "
+  if [ $is_cursor -eq 1 ]; then
+    cursor_sym="$SYM_ARROW "
+  fi
+  
+  local chk="$SYM_UNCHECKED"
+  if [ $is_selected -eq 1 ]; then
+    chk="$SYM_CHECKED"
+  fi
+  
+  # Format fixed visual widths of all components to guarantee exactly 70 columns inside the box
+  # Margins and symbols:
+  # - Left spacing (margin): 2 columns
+  # - Cursor symbol: 2 columns (e.g., "▶ " or "  ")
+  # - Checkbox: 5 columns (e.g., "[✔] " or "[ ] ")
+  # - Label (padded): 24 columns
+  # - Status (padded): 16 columns (e.g., "(Installed)     " or "(Not Installed) ")
+  # - Hardcoded spacing/padding: 21 columns
+  # Total width inside box = 2 + 2 + 5 + 24 + 16 + 21 = 70 columns!
+  
+  local pad_label
+  pad_label=$(printf "%-24s" "$label")
+  
+  local pad_status
+  if [ -n "$status" ]; then
+    pad_status=$(printf "%-16s" "($status)")
+  else
+    pad_status=$(printf "%-16s" "")
+  fi
+  
+  # Print left border
+  printf "%b%s%b" "$TUI_BORDER" "$BOX_V" "$NC"
+  
+  # Print margins and interactive items with color formatting
+  if [ $is_cursor -eq 1 ]; then
+    printf "  %b%s%b " "$TUI_HIGHLIGHT" "$SYM_ARROW" "$NC"
+    if [ $is_selected -eq 1 ]; then
+      printf "%b[%s]%b %b%s%b %b%s%b" "$TUI_CHECKED" "$chk" "$NC" "$TUI_HIGHLIGHT" "$pad_label" "$NC" "$TUI_CHECKED" "$pad_status" "$NC"
     else
-      log_info "Skipped package '$pkg'."
+      printf "%b[%s]%b %b%s%b %b%s%b" "$TUI_UNCHECKED" "$chk" "$NC" "$TUI_HIGHLIGHT" "$pad_label" "$NC" "$TUI_UNCHECKED" "$pad_status" "$NC"
+    fi
+  else
+    printf "    "
+    if [ $is_selected -eq 1 ]; then
+      printf "%b[%s]%b %s %s" "$TUI_CHECKED" "$chk" "$NC" "$pad_label" "$pad_status"
+    else
+      printf "%b[%s]%b %b%s %s%b" "$TUI_UNCHECKED" "$chk" "$NC" "$TUI_DIM" "$pad_label" "$pad_status" "$NC"
+    fi
+  fi
+  
+  # Print exact padding and right border (visual spacing = 21 columns)
+  printf "                     %b%s%b\e[K\n" "$TUI_BORDER" "$BOX_V" "$NC"
+}
+
+# Scrollable viewport variables
+scroll_offset=0
+view_height=8
+
+draw_step1() {
+  printf "\e[H"
+  draw_header "PREMIUM SHELL SETUP - STEP 1/3" "Select Packages to Install"
+  
+  # 2 spaces margin + 60 visual characters + 8 padding spaces = 70 columns inside.
+  printf "%b%s%b  %s        %b%s%b\e[K\n" "$TUI_BORDER" "$BOX_V" "$NC" "Use [↑/↓] to navigate, [Space] to toggle, [Enter] to continue." "$TUI_BORDER" "$BOX_V" "$NC"
+  
+  # Top scroll indicator
+  local top_scroll=" "
+  if [ $scroll_offset -gt 0 ]; then
+    top_scroll="▲ More packages above ▲"
+  fi
+  local pad_ts=$(( (70 - ${#top_scroll}) / 2 ))
+  printf "%b%s%b" "$TUI_BORDER" "$BOX_V" "$NC"
+  for ((i=0; i<pad_ts; i++)); do printf " "; done
+  printf "%b%s%b" "$TUI_DIM" "$top_scroll" "$NC"
+  for ((i=0; i<70 - pad_ts - ${#top_scroll}; i++)); do printf " "; done
+  printf "%b%s%b\e[K\n" "$TUI_BORDER" "$BOX_V" "$NC"
+  
+  # Print viewport items
+  local end_idx=$((scroll_offset + view_height))
+  for ((i=scroll_offset; i<end_idx; i++)); do
+    local label="${package_labels[i]}"
+    local status="Not Installed"
+    if [ ${package_installed[i]} -eq 1 ]; then
+      status="Installed"
+    fi
+    
+    local is_cursor=0
+    if [ $i -eq $cursor ]; then
+      is_cursor=1
+    fi
+    local is_selected=${package_selected[i]}
+    
+    print_menu_line "$is_cursor" "$is_selected" "$label" "$status"
+  done
+  
+  # Bottom scroll indicator
+  local bot_scroll=" "
+  if [ $((scroll_offset + view_height)) -lt ${#packages[@]} ]; then
+    bot_scroll="▼ More packages below ▼"
+  fi
+  local pad_bs=$(( (70 - ${#bot_scroll}) / 2 ))
+  printf "%b%s%b" "$TUI_BORDER" "$BOX_V" "$NC"
+  for ((i=0; i<pad_bs; i++)); do printf " "; done
+  printf "%b%s%b" "$TUI_DIM" "$bot_scroll" "$NC"
+  for ((i=0; i<70 - pad_bs - ${#bot_scroll}; i++)); do printf " "; done
+  printf "%b%s%b\e[K\n" "$TUI_BORDER" "$BOX_V" "$NC"
+  
+  draw_footer
+}
+
+run_step1() {
+  cursor=0
+  scroll_offset=0
+  clear
+  printf "\e[?25l" # Hide cursor
+  stty -echo -icanon 2>/dev/null
+  
+  while true; do
+    draw_step1
+    local key
+    key=$(read_key)
+    case "$key" in
+      $'\e[A') # Up arrow
+        ((cursor--))
+        if [ $cursor -lt 0 ]; then
+          cursor=$((${#packages[@]} - 1))
+          scroll_offset=$((${#packages[@]} - view_height))
+          if [ $scroll_offset -lt 0 ]; then scroll_offset=0; fi
+        elif [ $cursor -lt $scroll_offset ]; then
+          scroll_offset=$cursor
+        fi
+        ;;
+      $'\e[B') # Down arrow
+        ((cursor++))
+        if [ $cursor -ge ${#packages[@]} ]; then
+          cursor=0
+          scroll_offset=0
+        elif [ $cursor -ge $((scroll_offset + view_height)) ]; then
+          scroll_offset=$((cursor - view_height + 1))
+        fi
+        ;;
+      " ") # Spacebar
+        if [ ${package_selected[cursor]} -eq 1 ]; then
+          package_selected[cursor]=0
+        else
+          package_selected[cursor]=1
+        fi
+        ;;
+      ""|$'\n'|$'\r') # Enter
+        return 0
+        ;;
+      $'\e') # Escape (quit in Step 1)
+        return 2
+        ;;
+      "q"|"Q") # Quit
+        return 2
+        ;;
+    esac
+  done
+}
+
+draw_step2() {
+  printf "\e[H"
+  draw_header "PREMIUM SHELL SETUP - STEP 2/3" "Select Shell Configurations"
+  
+  # 2 spaces margin + 65 visual characters + 3 padding spaces = 70 columns inside.
+  printf "%b%s%b  %s   %b%s%b\e[K\n" "$TUI_BORDER" "$BOX_V" "$NC" "Use [↑/↓] to navigate, [Space] to toggle, [Enter] to start install." "$TUI_BORDER" "$BOX_V" "$NC"
+  printf "%b%s%b  %-66s  %b%s%b\e[K\n" "$TUI_BORDER" "$BOX_V" "$NC" "" "$TUI_BORDER" "$BOX_V" "$NC"
+  
+  for ((i=0; i<${#configs[@]}; i++)); do
+    local label="${config_labels[i]}"
+    local is_cursor=0
+    if [ $i -eq $cursor ]; then
+      is_cursor=1
+    fi
+    local is_selected=${config_selected[i]}
+    
+    print_menu_line "$is_cursor" "$is_selected" "$label" ""
+  done
+  
+  # Pad to match Step 1 height
+  for ((p=0; p<6; p++)); do
+    printf "%b%s%b" "$TUI_BORDER" "$BOX_V" "$NC"
+    for ((s=0; s<70; s++)); do printf " "; done
+    printf "%b%s%b\e[K\n" "$TUI_BORDER" "$BOX_V" "$NC"
+  done
+  
+  draw_footer
+}
+
+run_step2() {
+  cursor=0
+  clear
+  printf "\e[?25l" # Hide cursor
+  stty -echo -icanon 2>/dev/null
+  
+  while true; do
+    draw_step2
+    local key
+    key=$(read_key)
+    case "$key" in
+      $'\e[A') # Up arrow
+        ((cursor--))
+        if [ $cursor -lt 0 ]; then
+          cursor=$((${#configs[@]} - 1))
+        fi
+        ;;
+      $'\e[B') # Down arrow
+        ((cursor++))
+        if [ $cursor -ge ${#configs[@]} ]; then
+          cursor=0
+        fi
+        ;;
+      " ") # Spacebar
+        if [ ${config_selected[cursor]} -eq 1 ]; then
+          config_selected[cursor]=0
+        else
+          config_selected[cursor]=1
+        fi
+        ;;
+      ""|$'\n'|$'\r') # Enter
+        return 0
+        ;;
+      $'\e') # Escape (previous step in Step 2)
+        return 1
+        ;;
+      "q"|"Q") # Quit
+        return 2
+        ;;
+    esac
+  done
+}
+
+# Non-interactive installation routines
+
+run_install_macos() {
+  log_info "Running macOS installation tasks..."
+  
+  # Install Homebrew if missing
+  if ! command -v brew >/dev/null 2>&1; then
+    log_info "Homebrew not found. Installing Homebrew..."
+    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" </dev/null
+    
+    if [[ -f /opt/homebrew/bin/brew ]]; then
+      eval "$(/opt/homebrew/bin/brew shellenv)"
+    elif [[ -f /usr/local/bin/brew ]]; then
+      eval "$(/usr/local/bin/brew shellenv)"
+    fi
+  fi
+  
+  export HOMEBREW_NO_AUTO_UPDATE=1
+  
+  for ((i=0; i<${#packages[@]}; i++)); do
+    local pkg="${packages[i]}"
+    if [ "${package_selected[i]}" -eq 1 ] && [ "$pkg" != "ghostty" ]; then
+      log_info "Installing/upgrading package '$pkg'..."
+      brew install "$pkg" </dev/null
+    fi
+  done
+  
+  # Install Ghostty Cask if selected
+  local ghostty_idx=-1
+  for ((i=0; i<${#packages[@]}; i++)); do
+    if [ "${packages[i]}" = "ghostty" ]; then ghostty_idx=$i; break; fi
+  done
+  if [ $ghostty_idx -ne -1 ] && [ "${package_selected[ghostty_idx]}" -eq 1 ]; then
+    log_info "Installing Ghostty Cask..."
+    brew install --cask ghostty </dev/null
+  fi
+}
+
+run_install_ubuntu() {
+  log_info "Updating Ubuntu package lists..."
+  sudo apt-get update -y </dev/null
+
+  for ((i=0; i<${#packages[@]}; i++)); do
+    local pkg="${packages[i]}"
+    if [ "${package_selected[i]}" -eq 1 ]; then
+      if [[ "$pkg" != "zoxide" && "$pkg" != "starship" && "$pkg" != "ghostty" && "$pkg" != "eza" && "$pkg" != "lazygit" && "$pkg" != "dust" && "$pkg" != "fastfetch" ]]; then
+        local apt_pkg="$pkg"
+        if [ "$pkg" = "fd" ]; then
+          apt_pkg="fd-find"
+        fi
+        log_info "Installing/upgrading package '$apt_pkg'..."
+        sudo apt-get install -y "$apt_pkg" </dev/null
+      fi
     fi
   done
 
-  # Install zoxide
-  local zoxide_status=""
-  if command -v zoxide >/dev/null 2>&1; then
-    zoxide_status=" (currently installed)"
+  # Custom check for Eza
+  local eza_idx=-1
+  for ((i=0; i<${#packages[@]}; i++)); do
+    if [ "${packages[i]}" = "eza" ]; then eza_idx=$i; break; fi
+  done
+  if [ $eza_idx -ne -1 ] && [ "${package_selected[eza_idx]}" -eq 1 ]; then
+    if apt-cache show eza >/dev/null 2>&1; then
+      log_info "Installing eza via apt-get..."
+      sudo apt-get install -y eza </dev/null
+    elif apt-cache show exa >/dev/null 2>&1; then
+      log_info "eza not found in apt. Installing exa (ls replacement) instead..."
+      sudo apt-get install -y exa </dev/null
+    else
+      log_info "eza not found in apt. Installing via snap..."
+      sudo snap install eza </dev/null
+    fi
   fi
-  if confirm "Install/upgrade zoxide$zoxide_status?"; then
+
+  # Custom check for Lazygit
+  local lazygit_idx=-1
+  for ((i=0; i<${#packages[@]}; i++)); do
+    if [ "${packages[i]}" = "lazygit" ]; then lazygit_idx=$i; break; fi
+  done
+  if [ $lazygit_idx -ne -1 ] && [ "${package_selected[lazygit_idx]}" -eq 1 ]; then
+    if apt-cache show lazygit >/dev/null 2>&1; then
+      log_info "Installing lazygit via apt-get..."
+      sudo apt-get install -y lazygit </dev/null
+    else
+      log_info "lazygit not found in apt. Installing via snap..."
+      sudo snap install lazygit --classic </dev/null
+    fi
+  fi
+
+  # Custom check for Zoxide
+  local zoxide_idx=-1
+  for ((i=0; i<${#packages[@]}; i++)); do
+    if [ "${packages[i]}" = "zoxide" ]; then zoxide_idx=$i; break; fi
+  done
+  if [ $zoxide_idx -ne -1 ] && [ "${package_selected[zoxide_idx]}" -eq 1 ]; then
     if apt-cache show zoxide >/dev/null 2>&1; then
       log_info "Installing zoxide via apt-get..."
-      sudo apt-get install -y zoxide
+      sudo apt-get install -y zoxide </dev/null
     else
-      log_warning "zoxide not found in apt repositories. Installing via official installation script..."
-      echo ""
-      curl -sS https://raw.githubusercontent.com/ajeetdsouza/zoxide/main/install.sh | sh
+      log_warning "zoxide not found in apt. Installing via script..."
+      curl -sS https://raw.githubusercontent.com/ajeetdsouza/zoxide/main/install.sh | sh </dev/null
       export PATH="$HOME/.local/bin:$PATH"
     fi
-  else
-    log_info "Skipped zoxide."
   fi
 
-  # Install starship
-  local starship_status=""
-  if command -v starship >/dev/null 2>&1; then
-    starship_status=" (currently installed)"
-  fi
-  if confirm "Install/upgrade starship$starship_status?"; then
+  # Custom check for Starship
+  local starship_idx=-1
+  for ((i=0; i<${#packages[@]}; i++)); do
+    if [ "${packages[i]}" = "starship" ]; then starship_idx=$i; break; fi
+  done
+  if [ $starship_idx -ne -1 ] && [ "${package_selected[starship_idx]}" -eq 1 ]; then
     log_info "Installing starship prompt..."
-    curl -sS https://starship.rs/install.sh | sh -s -- --yes
-  else
-    log_info "Skipped starship."
+    curl -sS https://starship.rs/install.sh | sh -s -- --yes </dev/null
   fi
 
-  # Install Ghostty terminal (Snap / apt)
-  local ghostty_status=""
-  if command -v ghostty >/dev/null 2>&1; then
-    ghostty_status=" (currently installed)"
-  fi
-  if confirm "Install/upgrade Ghostty terminal$ghostty_status?"; then
+  # Custom check for Ghostty
+  local ghostty_idx=-1
+  for ((i=0; i<${#packages[@]}; i++)); do
+    if [ "${packages[i]}" = "ghostty" ]; then ghostty_idx=$i; break; fi
+  done
+  if [ $ghostty_idx -ne -1 ] && [ "${package_selected[ghostty_idx]}" -eq 1 ]; then
     if command -v snap >/dev/null 2>&1; then
-      log_info "Installing Ghostty terminal via snap..."
-      sudo snap install ghostty
+      log_info "Installing Ghostty via snap..."
+      sudo snap install ghostty </dev/null
     elif apt-cache show ghostty >/dev/null 2>&1; then
-      log_info "Installing Ghostty terminal via apt..."
-      sudo apt-get install -y ghostty
+      log_info "Installing Ghostty via apt..."
+      sudo apt-get install -y ghostty </dev/null
     else
-      log_warning "Ghostty terminal is not available in snap or apt repositories for this version of Ubuntu."
-      echo ""
+      log_warning "Ghostty terminal is not available in snap or apt repositories."
     fi
-  else
-    log_info "Skipped Ghostty terminal."
+  fi
+
+  # Custom check for Dust
+  local dust_idx=-1
+  for ((i=0; i<${#packages[@]}; i++)); do
+    if [ "${packages[i]}" = "dust" ]; then dust_idx=$i; break; fi
+  done
+  if [ $dust_idx -ne -1 ] && [ "${package_selected[dust_idx]}" -eq 1 ]; then
+    if apt-cache show du-dust >/dev/null 2>&1; then
+      log_info "Installing dust via apt-get..."
+      sudo apt-get install -y du-dust </dev/null
+    elif command -v snap >/dev/null 2>&1; then
+      log_info "Installing dust via snap..."
+      sudo snap install dust </dev/null
+    else
+      log_warning "Dust is not available in apt or snap repositories."
+    fi
+  fi
+
+  # Custom check for Fastfetch
+  local fastfetch_idx=-1
+  for ((i=0; i<${#packages[@]}; i++)); do
+    if [ "${packages[i]}" = "fastfetch" ]; then fastfetch_idx=$i; break; fi
+  done
+  if [ $fastfetch_idx -ne -1 ] && [ "${package_selected[fastfetch_idx]}" -eq 1 ]; then
+    if apt-cache show fastfetch >/dev/null 2>&1; then
+      log_info "Installing fastfetch via apt-get..."
+      sudo apt-get install -y fastfetch </dev/null
+    elif command -v snap >/dev/null 2>&1; then
+      log_info "Installing fastfetch via snap..."
+      sudo snap install fastfetch </dev/null
+    else
+      log_warning "Fastfetch is not available in apt or snap repositories."
+    fi
   fi
 }
 
-# Arch Linux Installation Flow
-install_arch() {
-  for pkg in zsh zoxide fzf git curl neovim tmux starship ghostty; do
-    local status=""
-    local cmd="$pkg"
-    if [ "$pkg" = "neovim" ]; then
-      cmd="nvim"
-    fi
-    if command -v "$cmd" >/dev/null 2>&1; then
-      status=" (currently installed)"
-    fi
-    if confirm "Install/upgrade package '$pkg'$status?"; then
-      log_info "Installing/upgrading '$pkg'..."
-      sudo pacman -Sy --needed --noconfirm "$pkg"
-    else
-      log_info "Skipped package '$pkg'."
+run_install_arch() {
+  log_info "Running Arch Linux installation tasks..."
+  for ((i=0; i<${#packages[@]}; i++)); do
+    local pkg="${packages[i]}"
+    if [ "${package_selected[i]}" -eq 1 ]; then
+      local pacman_pkg="$pkg"
+      if [ "$pkg" = "gh" ]; then
+        pacman_pkg="github-cli"
+      fi
+      log_info "Installing/upgrading package '$pacman_pkg'..."
+      sudo pacman -Sy --needed --noconfirm "$pacman_pkg" </dev/null
     fi
   done
 }
 
-# Clone Zsh Plugins from GitHub
-setup_plugins() {
+run_setup_plugins() {
   local plugin_dir="$HOME/.zsh/plugins"
   log_info "Setting up custom Zsh plugins in $plugin_dir..."
   mkdir -p "$plugin_dir"
 
   # zsh-autosuggestions
-  local status_autosuggestions=""
-  if [ -d "$plugin_dir/zsh-autosuggestions" ]; then
-    status_autosuggestions=" (currently installed)"
-  fi
-  if confirm "Setup/update Zsh plugin 'zsh-autosuggestions'$status_autosuggestions?"; then
-    if [ ! -d "$plugin_dir/zsh-autosuggestions" ]; then
-      log_info "Cloning zsh-autosuggestions..."
-      git clone https://github.com/zsh-users/zsh-autosuggestions "$plugin_dir/zsh-autosuggestions"
-    else
-      log_success "zsh-autosuggestions is already cloned. Pulling latest updates..."
-      git -C "$plugin_dir/zsh-autosuggestions" pull
-    fi
+  if [ ! -d "$plugin_dir/zsh-autosuggestions" ]; then
+    log_info "Cloning zsh-autosuggestions..."
+    git clone https://github.com/zsh-users/zsh-autosuggestions "$plugin_dir/zsh-autosuggestions"
   else
-    log_info "Skipped 'zsh-autosuggestions' plugin."
+    log_info "zsh-autosuggestions exists. Pulling latest updates..."
+    git -C "$plugin_dir/zsh-autosuggestions" pull
   fi
-  echo ""
 
   # zsh-syntax-highlighting
-  local status_syntax=""
-  if [ -d "$plugin_dir/zsh-syntax-highlighting" ]; then
-    status_syntax=" (currently installed)"
-  fi
-  if confirm "Setup/update Zsh plugin 'zsh-syntax-highlighting'$status_syntax?"; then
-    if [ ! -d "$plugin_dir/zsh-syntax-highlighting" ]; then
-      log_info "Cloning zsh-syntax-highlighting..."
-      git clone https://github.com/zsh-users/zsh-syntax-highlighting "$plugin_dir/zsh-syntax-highlighting"
-    else
-      log_success "zsh-syntax-highlighting is already cloned. Pulling latest updates..."
-      git -C "$plugin_dir/zsh-syntax-highlighting" pull
-    fi
+  if [ ! -d "$plugin_dir/zsh-syntax-highlighting" ]; then
+    log_info "Cloning zsh-syntax-highlighting..."
+    git clone https://github.com/zsh-users/zsh-syntax-highlighting "$plugin_dir/zsh-syntax-highlighting"
   else
-    log_info "Skipped 'zsh-syntax-highlighting' plugin."
+    log_info "zsh-syntax-highlighting exists. Pulling latest updates..."
+    git -C "$plugin_dir/zsh-syntax-highlighting" pull
   fi
-  echo ""
 
   # fzf-tab
-  local status_fzftab=""
-  if [ -d "$plugin_dir/fzf-tab" ]; then
-    status_fzftab=" (currently installed)"
-  fi
-  if confirm "Setup/update Zsh plugin 'fzf-tab'$status_fzftab?"; then
-    if [ ! -d "$plugin_dir/fzf-tab" ]; then
-      log_info "Cloning fzf-tab..."
-      git clone https://github.com/Aloxaf/fzf-tab "$plugin_dir/fzf-tab"
-    else
-      log_success "fzf-tab is already cloned. Pulling latest updates..."
-      git -C "$plugin_dir/fzf-tab" pull
-    fi
+  if [ ! -d "$plugin_dir/fzf-tab" ]; then
+    log_info "Cloning fzf-tab..."
+    git clone https://github.com/Aloxaf/fzf-tab "$plugin_dir/fzf-tab"
   else
-    log_info "Skipped 'fzf-tab' plugin."
+    log_info "fzf-tab exists. Pulling latest updates..."
+    git -C "$plugin_dir/fzf-tab" pull
   fi
 }
 
-# Configure .zshrc in an idempotent way
 configure_zshrc() {
   local zshrc="$HOME/.zshrc"
 
@@ -318,7 +770,9 @@ fi
 
 # Setup Zoxide
 if command -v zoxide >/dev/null 2>&1; then
+  # ---- Zoxide (better cd) ----
   eval "$(zoxide init zsh)"
+  alias cd="z"
 fi
 
 # Setup Fzf
@@ -334,25 +788,32 @@ fi
 if command -v starship >/dev/null 2>&1; then
   eval "$(starship init zsh)"
 fi
+
+# Setup Direnv
+if command -v direnv >/dev/null 2>&1; then
+  eval "$(direnv hook zsh)"
+fi
+
+# Setup Eza Aliases
+if command -v eza >/dev/null 2>&1; then
+  # ---- Eza (better ls) -----
+  alias ls="eza --color=always --long --git --no-filesize --icons=always --no-time --no-user --no-permissions --tree --level=1"
+fi
 # <<< installer-setup end <<<
 EOF
   )
 
-  # Check if our block is already present in .zshrc
+  # Check if block is already present in .zshrc
   if grep -q "# >>> installer-setup start >>>" "$zshrc"; then
     log_info "Updating existing configuration block in .zshrc..."
     local temp_file
     temp_file=$(mktemp)
 
-    # Strip existing block and write to temp file
     awk '/# >>> installer-setup start >>>/{flag=1;next}/# <<< installer-setup end <<</{flag=0;next}!flag' "$zshrc" > "$temp_file"
-
-    # Append new block
     echo "$config_block" >> "$temp_file"
     mv "$temp_file" "$zshrc"
   else
     log_info "Appending configuration block to .zshrc..."
-    # Ensure there's a trailing newline before appending
     [ -s "$zshrc" ] && [ -n "$(tail -c1 "$zshrc" 2>/dev/null)" ] && echo "" >> "$zshrc"
     echo "$config_block" >> "$zshrc"
   fi
@@ -360,7 +821,6 @@ EOF
   log_success ".zshrc successfully configured!"
 }
 
-# Change default shell to Zsh
 change_shell() {
   local target_shell
   target_shell=$(command -v zsh)
@@ -383,145 +843,439 @@ change_shell() {
 
   # Check if the current shell is already Zsh
   if [[ "$current_shell" != *zsh ]]; then
-    log_info "Your current default login shell is: $current_shell"
+    log_info "Current default login shell: $current_shell"
     log_info "Changing default login shell to Zsh ($target_shell)..."
-    log_warning "This action may request your password."
-    echo ""
-    if chsh -s "$target_shell"; then
+    if sudo chsh -s "$target_shell" "$USER"; then
       log_success "Default login shell changed to Zsh successfully!"
     else
       log_error "Could not automatically change default login shell."
-      log_warning "To change it manually, please run:"
-      log_warning "  chsh -s $target_shell"
-      echo ""
+      return 1
     fi
   else
-    log_success "Zsh ($current_shell) is already your default login shell."
+    log_success "Zsh ($current_shell) is already default login shell."
   fi
 }
 
-# Clone dotfiles repo and setup neovim + ghostty configs
-setup_dotfiles() {
-  local has_dotfiles=""
-  if [ -d "$HOME/.config/nvim" ] || [ -d "$HOME/.config/ghostty" ]; then
-    has_dotfiles=" (configs exist)"
+run_setup_dotfiles() {
+  log_info "Setting up Neovim and Ghostty configurations from dotfiles repository..."
+  local config_dir="$HOME/.config"
+  mkdir -p "$config_dir"
+
+  local temp_dir
+  temp_dir=$(mktemp -d)
+
+  log_info "Cloning dotfiles repository..."
+  if git clone https://github.com/sanjay-np/dotfiles "$temp_dir" >/dev/null 2>&1; then
+    
+    # Setup Neovim Config
+    if [ -d "$temp_dir/nvim" ]; then
+      if [ -d "$config_dir/nvim" ]; then
+        local nvim_backup="${config_dir}/nvim.bak_$(date +%Y%m%d_%H%M%S)"
+        log_info "Existing Neovim configuration found. Backing up to $nvim_backup..."
+        mv "$config_dir/nvim" "$nvim_backup"
+      fi
+      log_info "Copying Neovim configuration to $config_dir/nvim..."
+      cp -R "$temp_dir/nvim" "$config_dir/nvim"
+      log_success "Neovim configuration successfully set up!"
+    else
+      log_warning "No 'nvim' directory found in dotfiles repository."
+    fi
+
+    # Setup Ghostty Config
+    if [ -d "$temp_dir/ghostty" ]; then
+      if [ -d "$config_dir/ghostty" ]; then
+        local ghostty_backup="${config_dir}/ghostty.bak_$(date +%Y%m%d_%H%M%S)"
+        log_info "Existing Ghostty configuration found. Backing up to $ghostty_backup..."
+        mv "$config_dir/ghostty" "$ghostty_backup"
+      fi
+      log_info "Copying Ghostty configuration to $config_dir/ghostty..."
+      cp -R "$temp_dir/ghostty" "$config_dir/ghostty"
+      log_success "Ghostty configuration successfully set up!"
+    else
+      log_warning "No 'ghostty' directory found in dotfiles repository."
+    fi
+
+    rm -rf "$temp_dir"
+  else
+    log_error "Failed to clone dotfiles repository. Skipping config setups."
+    rm -rf "$temp_dir"
+    return 1
   fi
-  if confirm "Clone dotfiles repository and configure Neovim/Ghostty$has_dotfiles?"; then
-    log_info "Setting up Neovim and Ghostty configurations from dotfiles repository..."
-    local config_dir="$HOME/.config"
-    mkdir -p "$config_dir"
+}
 
-    local temp_dir
-    temp_dir=$(mktemp -d)
+run_install_opencode() {
+  log_info "Installing opencode.ai via official curl script..."
+  if curl -fsSL https://opencode.ai/install | bash; then
+    log_success "opencode.ai successfully installed!"
+  else
+    log_error "Failed to install opencode.ai."
+    return 1
+  fi
+}
 
-    log_info "Cloning dotfiles repository..."
-    if git clone https://github.com/sanjay-np/dotfiles "$temp_dir" >/dev/null 2>&1; then
+run_current_task() {
+  local task="$1"
+  case "$task" in
+    packages)
+      case "$OS" in
+        macos) run_install_macos ;;
+        ubuntu) run_install_ubuntu ;;
+        arch) run_install_arch ;;
+      esac
+      ;;
+    plugins)
+      run_setup_plugins
+      ;;
+    zshrc)
+      configure_zshrc
+      ;;
+    shell)
+      change_shell
+      ;;
+    dotfiles)
+      run_setup_dotfiles
+      ;;
+    opencode)
+      run_install_opencode
+      ;;
+  esac
+}
+
+# Step 3 Task Builder & Runner
+run_tasks=()
+run_task_labels=()
+run_task_status=() # 0: Pending, 1: Running, 2: Success, 3: Failed, 4: Skipped
+
+build_run_tasks() {
+  local any_pkg_selected=0
+  for s in "${package_selected[@]}"; do
+    if [ "$s" -eq 1 ]; then
+      any_pkg_selected=1
+    fi
+  done
+  
+  local task_idx=0
+  
+  # 1. Packages Task
+  run_tasks[task_idx]="packages"
+  run_task_labels[task_idx]="Installing selected packages"
+  if [ $any_pkg_selected -eq 1 ]; then
+    run_task_status[task_idx]=0
+  else
+    run_task_status[task_idx]=4
+  fi
+  ((task_idx++))
+  
+  # 2. Plugins Task
+  run_tasks[task_idx]="plugins"
+  run_task_labels[task_idx]="Setting up custom Zsh plugins"
+  if [ ${config_selected[0]} -eq 1 ]; then
+    run_task_status[task_idx]=0
+  else
+    run_task_status[task_idx]=4
+  fi
+  ((task_idx++))
+  
+  # 3. Zshrc Settings Task
+  run_tasks[task_idx]="zshrc"
+  run_task_labels[task_idx]="Configuring .zshrc settings"
+  if [ ${config_selected[0]} -eq 1 ]; then
+    run_task_status[task_idx]=0
+  else
+    run_task_status[task_idx]=4
+  fi
+  ((task_idx++))
+  
+  # 4. Default Shell Task
+  run_tasks[task_idx]="shell"
+  run_task_labels[task_idx]="Changing default login shell to Zsh"
+  if [ ${config_selected[1]} -eq 1 ]; then
+    run_task_status[task_idx]=0
+  else
+    run_task_status[task_idx]=4
+  fi
+  ((task_idx++))
+  
+  # 5. Dotfiles Task
+  run_tasks[task_idx]="dotfiles"
+  run_task_labels[task_idx]="Cloning dotfiles & configuring Neovim/Ghostty"
+  if [ ${config_selected[2]} -eq 1 ]; then
+    run_task_status[task_idx]=0
+  else
+    run_task_status[task_idx]=4
+  fi
+  ((task_idx++))
+  
+  # 6. Opencode Task
+  run_tasks[task_idx]="opencode"
+  run_task_labels[task_idx]="Installing/upgrading opencode.ai"
+  if [ ${config_selected[3]} -eq 1 ]; then
+    run_task_status[task_idx]=0
+  else
+    run_task_status[task_idx]=4
+  fi
+  ((task_idx++))
+}
+
+draw_step3() {
+  local spinner="$1"
+  printf "\e[H"
+  
+  draw_header "PREMIUM SHELL SETUP - STEP 3/3" "Executing Installations..."
+  
+  for ((i=0; i<${#run_tasks[@]}; i++)); do
+    local label="${run_task_labels[i]}"
+    local status="${run_task_status[i]}"
+    local sym="$SYM_UNCHECKED"
+    local color=""
+    
+    case "$status" in
+      0) # Pending
+        sym="$SYM_UNCHECKED"
+        color="$TUI_DIM"
+        ;;
+      1) # Running
+        sym="$spinner"
+        color="$TUI_HIGHLIGHT"
+        ;;
+      2) # Success
+        sym="$SYM_SUCCESS"
+        color="$TUI_SUCCESS"
+        ;;
+      3) # Failed
+        sym="$SYM_FAILED"
+        color="$TUI_FAILED"
+        ;;
+      4) # Skipped
+        sym="$SYM_UNCHECKED"
+        color="$TUI_DIM"
+        label="$label (Skipped)"
+        ;;
+    esac
+    
+    # Format with fixed widths to ensure exact 70 columns inside the box under all circumstances
+    # Margins and symbols:
+    # - Left spacing (margin): 2 columns
+    # - Status symbol: 4 columns (e.g. "[✔] ")
+    # - Label (padded): 55 columns
+    # - Hardcoded spacing/padding: 9 columns
+    # Total width inside box = 2 + 4 + 55 + 9 = 70 columns!
+    local pad_label
+    pad_label=$(printf "%-55s" "$label")
+    
+    printf "%b%s%b  %b[%s]%b %b%s%b         %b%s%b\e[K\n" \
+      "$TUI_BORDER" "$BOX_V" "$NC" \
+      "$color" "$sym" "$NC" \
+      "$color" "$pad_label" "$NC" \
+      "$TUI_BORDER" "$BOX_V" "$NC"
+  done
+  
+  # Pad tasks box to height 7 if there are fewer
+  for ((i=${#run_tasks[@]}; i<7; i++)); do
+    printf "%b%s%b" "$TUI_BORDER" "$BOX_V" "$NC"
+    for ((p=0; p<70; p++)); do printf " "; done
+    printf "%b%s%b\e[K\n" "$TUI_BORDER" "$BOX_V" "$NC"
+  done
+  
+  # Horizontal divider
+  printf "%b%s" "$TUI_BORDER" "$BOX_ML"
+  for ((i=0; i<70; i++)); do printf "%s" "$BOX_H"; done
+  printf "%s%b\e[K\n" "$BOX_MR" "$NC"
+  
+  # Log title
+  local log_title=" LIVE INSTALLATION LOGS (tail) "
+  local pad_l=$(( (70 - ${#log_title}) / 2 ))
+  printf "%b%s%b" "$TUI_BORDER" "$BOX_V" "$NC"
+  for ((i=0; i<pad_l; i++)); do printf " "; done
+  printf "%b%s%b" "\e[1;33m" "$log_title" "$NC"
+  for ((i=0; i<70 - pad_l - ${#log_title}; i++)); do printf " "; done
+  printf "%b%s%b\e[K\n" "$TUI_BORDER" "$BOX_V" "$NC"
+  
+  # Draw log lines
+  local count=0
+  if [ -f "$LOG_FILE" ]; then
+    local line
+    while IFS= read -r line || [ -n "$line" ]; do
+      # Remove carriage returns and extract last status on the line, strip ANSI, replace tabs
+      local plain_line
+      plain_line=$(echo "$line" | tr '\r' '\n' | tail -n 1 | sed 's/\x1B\[[0-9;]*[a-zA-Z]//g' | tr '\t' ' ')
       
-      # Setup Neovim Config
-      if [ -d "$temp_dir/nvim" ]; then
-        if [ -d "$config_dir/nvim" ]; then
-          local nvim_backup="${config_dir}/nvim.bak_$(date +%Y%m%d_%H%M%S)"
-          log_info "Existing Neovim configuration found. Backing up to $nvim_backup..."
-          mv "$config_dir/nvim" "$nvim_backup"
-        fi
-        log_info "Copying Neovim configuration to $config_dir/nvim..."
-        cp -R "$temp_dir/nvim" "$config_dir/nvim"
-        log_success "Neovim configuration successfully set up!"
-      else
-        log_warning "No 'nvim' directory found in dotfiles repository."
-        echo ""
+      if [ ${#plain_line} -gt 62 ]; then
+        plain_line="${plain_line:0:59}..."
       fi
-
-      # Setup Ghostty Config
-      if [ -d "$temp_dir/ghostty" ]; then
-        if [ -d "$config_dir/ghostty" ]; then
-          local ghostty_backup="${config_dir}/ghostty.bak_$(date +%Y%m%d_%H%M%S)"
-          log_info "Existing Ghostty configuration found. Backing up to $ghostty_backup..."
-          mv "$config_dir/ghostty" "$ghostty_backup"
-        fi
-        log_info "Copying Ghostty configuration to $config_dir/ghostty..."
-        cp -R "$temp_dir/ghostty" "$config_dir/ghostty"
-        log_success "Ghostty configuration successfully set up!"
-      else
-        log_warning "No 'ghostty' directory found in dotfiles repository."
-        echo ""
-      fi
-
-      rm -rf "$temp_dir"
-    else
-      log_error "Failed to clone dotfiles repository. Skipping config setups."
-      rm -rf "$temp_dir"
-    fi
-  else
-    log_info "Skipped dotfiles configuration setup."
+      local pad_line
+      pad_line=$(printf "%-62s" "$plain_line")
+      
+      printf "%b%s%b   %b%s%b   %b%s%b\e[K\n" "$TUI_BORDER" "$BOX_V" "$NC" "$TUI_DIM" "$pad_line" "$NC" "$TUI_BORDER" "$BOX_V" "$NC"
+      ((count++))
+      if [ $count -eq 6 ]; then break; fi
+    done < <(tail -n 6 "$LOG_FILE" 2>/dev/null)
   fi
+  
+  # Fill remaining log lines
+  for ((i=count; i<6; i++)); do
+    printf "%b%s%b" "$TUI_BORDER" "$BOX_V" "$NC"
+    for ((p=0; p<70; p++)); do printf " "; done
+    printf "%b%s%b\e[K\n" "$TUI_BORDER" "$BOX_V" "$NC"
+  done
+  
+  # Bottom border
+  draw_footer
 }
 
-# Install opencode.ai via curl script
-install_opencode() {
-  local status=""
-  if command -v opencode >/dev/null 2>&1; then
-    status=" (currently installed)"
-  fi
-  if confirm "Install/upgrade opencode.ai$status?"; then
-    log_info "Installing opencode.ai via official curl script..."
-    if curl -fsSL https://opencode.ai/install | bash; then
-      log_success "opencode.ai successfully installed!"
-    else
-      log_error "Failed to install opencode.ai."
+run_step3() {
+  clear
+  printf "\e[?25l" # Hide cursor
+  
+  # Setup log file
+  LOG_FILE=$(mktemp -t installer_setup.log 2>/dev/null || echo "/tmp/installer_setup.log")
+  echo "--- Premium Installer Setup Log Started ---" > "$LOG_FILE"
+  echo "OS Detected: $OS" >> "$LOG_FILE"
+  echo "Date: $(date)" >> "$LOG_FILE"
+  echo "" >> "$LOG_FILE"
+  
+  local spinner_frames=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
+  
+  for ((t=0; t<${#run_tasks[@]}; t++)); do
+    local task_name="${run_tasks[t]}"
+    local task_state="${run_task_status[t]}"
+    
+    if [ "$task_state" -eq 0 ]; then
+      run_task_status[t]=1 # Running
+      
+      # Start in background
+      run_current_task "$task_name" >> "$LOG_FILE" 2>&1 &
+      local task_pid=$!
+      
+      local frame_idx=0
+      while kill -0 $task_pid 2>/dev/null; do
+        draw_step3 "${spinner_frames[frame_idx]}"
+        frame_idx=$(( (frame_idx + 1) % 10 ))
+        sleep 0.1
+      done
+      
+      wait $task_pid
+      local exit_code=$?
+      if [ $exit_code -eq 0 ]; then
+        run_task_status[t]=2 # Success
+      else
+        run_task_status[t]=3 # Failed
+      fi
     fi
+    
+    draw_step3 " "
+  done
+  
+  sleep 1
+  clear
+  cleanup_tui
+  
+  # Print beautiful final summary
+  echo -e "${MAGENTA}${BOLD}==================================================${NC}"
+  echo -e "${GREEN}${BOLD}             INSTALLATION COMPLETE!               ${NC}"
+  echo -e "${MAGENTA}${BOLD}==================================================${NC}"
+  echo ""
+  
+  local failures=0
+  for ((t=0; t<${#run_tasks[@]}; t++)); do
+    local label="${run_task_labels[t]}"
+    local status="${run_task_status[t]}"
+    if [ "$status" -eq 2 ]; then
+      echo -e "${GREEN}${BOLD}[✔]${NC} $label"
+    elif [ "$status" -eq 3 ]; then
+      echo -e "${RED}${BOLD}[✘]${NC} $label (Failed)"
+      ((failures++))
+    elif [ "$status" -eq 4 ]; then
+      echo -e "${YELLOW}[-]${NC} $label (Skipped)"
+    fi
+  done
+  
+  echo ""
+  if [ $failures -gt 0 ]; then
+    log_warning "Installation finished with $failures errors. Please review the log file at:"
+    echo -e "  ${BOLD}$LOG_FILE${NC}"
   else
-    log_info "Skipped opencode.ai."
+    log_success "All tasks completed successfully!"
+    log_info "Detailed setup logs are saved at: $LOG_FILE"
   fi
+  echo ""
+  log_success "Setup complete! Please restart your terminal or run: source ~/.zshrc"
+  echo ""
 }
 
-# Main Execution Flow
+# Print beautiful header for non-TUI parts
+print_header() {
+  echo -e "${MAGENTA}${BOLD}==================================================${NC}"
+  echo -e "${CYAN}${BOLD}       PREMIUM SHELL SETUP & INSTALLER            ${NC}"
+  echo -e "${MAGENTA}${BOLD}==================================================${NC}"
+  echo ""
+}
+
 main() {
   print_header
   detect_os
-
-  case "$OS" in
-    macos)
-      install_macos
-    ;;
-    ubuntu)
-      install_ubuntu
-    ;;
-    arch)
-      install_arch
-    ;;
-    *)
-      log_error "Unsupported operating system."
-      log_warning "This script only supports macOS, Ubuntu/Debian, and Arch Linux."
-      exit 1
-    ;;
-  esac
-  echo ""
-
-  setup_plugins
-  echo ""
-
-  if confirm "Configure Zsh configurations in .zshrc?"; then
-    configure_zshrc
-  else
-    log_info "Skipped .zshrc configuration."
+  
+  if [ "$OS" = "unknown" ]; then
+    log_error "Unsupported operating system."
+    log_warning "This script only supports macOS, Ubuntu/Debian, and Arch Linux."
+    exit 1
   fi
-  echo ""
-
-  if confirm "Change default login shell to Zsh?"; then
-    change_shell
-  else
-    log_info "Skipped default login shell change."
-  fi
-  echo ""
-
-  setup_dotfiles
-  echo ""
-
-  install_opencode
-
-  echo ""
-  log_success "Setup complete! Please restart your terminal or run: source ~/.zshrc"
+  
+  check_terminal_size
+  
+  # Authenticate sudo first so TUI background calls aren't blocked
+  setup_sudo
+  
+  log_info "Scanning current package statuses..."
+  for ((i=0; i<${#packages[@]}; i++)); do
+    if is_pkg_installed "${packages[i]}"; then
+      package_installed[i]=1
+      package_selected[i]=0 # Do not pre-select if already installed
+    else
+      package_installed[i]=0
+      package_selected[i]=1 # Pre-select by default if not installed
+    fi
+  done
+  
+  # Run TUI Setup Wizard state machine
+  local wizard_step=1
+  while true; do
+    case "$wizard_step" in
+      1)
+        run_step1
+        local ret_step1=$?
+        if [ $ret_step1 -eq 0 ]; then
+          wizard_step=2
+        elif [ $ret_step1 -eq 2 ]; then
+          clear
+          cleanup_tui
+          log_info "Setup cancelled by user."
+          exit 0
+        fi
+        ;;
+      2)
+        run_step2
+        local ret_step2=$?
+        if [ $ret_step2 -eq 0 ]; then
+          wizard_step=3
+          break
+        elif [ $ret_step2 -eq 1 ]; then
+          wizard_step=1
+        elif [ $ret_step2 -eq 2 ]; then
+          clear
+          cleanup_tui
+          log_info "Setup cancelled by user."
+          exit 0
+        fi
+        ;;
+    esac
+  done
+  
+  # Build Step 3 status tasks
+  build_run_tasks
+  
+  # Run installations
+  run_step3
 }
 
 main "$@"
