@@ -14,9 +14,9 @@ An elegant, robust, and completely idempotent Bash script (`install.sh`) to boot
     *   [zsh-syntax-highlighting](https://github.com/zsh-users/zsh-syntax-highlighting)
     *   [fzf-tab](https://github.com/Aloxaf/fzf-tab)
 *   **Starship Integration**: Automatically installs [Starship](https://starship.rs/) and initializes it cleanly inside your `.zshrc`.
-*   **Modern CLI Stack**: Installs `neovim`, `tmux`, `zoxide`, `fzf`, `git`, `curl`, and `ghostty` terminal.
-*   **Automated Dotfiles Configuration**: Safely clones custom configurations from a personal dotfiles repository (`https://github.com/sanjay-np/dotfiles`) and syncs Neovim and Ghostty configurations directly to your `~/.config/` directory.
-*   **Automatic Backup Safeguards**: Before altering `.zshrc`, `~/.config/nvim`, or `~/.config/ghostty`, the script automatically creates timestamped backups (e.g., `~/.zshrc.bak_YYYYMMDD_HHMMSS`), ensuring zero data loss.
+*   **Modern CLI Stack**: Installs `neovim`, `tmux`, `zoxide`, `fzf`, `git`, `curl`, `tree-sitter-cli`, and `ghostty` terminal.
+*   **Automated Dotfiles Configuration**: Safely clones custom configurations from a personal dotfiles repository (`https://github.com/sanjay-np/dotfiles`) and syncs Neovim, Ghostty, tmux, and Starship configurations directly to your `~/.config/` directory.
+*   **Automatic Backup Safeguards**: Before altering `.zshrc`, `~/.config/nvim`, `~/.config/ghostty`, `~/.config/tmux`, or `~/.config/starship.toml`, the script automatically creates timestamped backups (e.g., `~/.zshrc.bak_YYYYMMDD_HHMMSS`), ensuring zero data loss.
 *   **Smart Shell Switching**: Automatically triggers `chsh` to switch your default login shell to Zsh, dynamically bypassing password prompts if you are already using Zsh.
 *   **Premium CLI Presentation**: Features color-coded logging statuses (`[INFO]`, `[SUCCESS]`, `[WARNING]`, `[ERROR]`) with visual gaps between logical execution groups.
 
@@ -48,6 +48,7 @@ An elegant, robust, and completely idempotent Bash script (`install.sh`) to boot
 | **Dust** | du alternative | Homebrew | Snap / Apt | Pacman |
 | **Fastfetch** | System info fetcher | Homebrew | Snap / Apt | Pacman |
 | **Ncdu** | Disk usage analyzer | Homebrew | Apt | Pacman |
+| **Tree-sitter CLI** | Incremental parsing system | Homebrew | Apt | Pacman |
 
 ---
 

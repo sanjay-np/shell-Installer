@@ -166,6 +166,7 @@ is_pkg_installed() {
   case "$pkg" in
     neovim)   cmd="nvim" ;;
     ripgrep)  cmd="rg" ;;
+    tree-sitter-cli) cmd="tree-sitter" ;;
     fd)
       if command -v fdfind >/dev/null 2>&1; then return 0; fi
       cmd="fd"
@@ -198,13 +199,13 @@ is_pkg_installed() {
 packages=(
   "zsh" "zoxide" "fzf" "git" "curl" "neovim" "tmux" "starship" "ghostty"
   "eza" "bat" "fd" "ripgrep" "btop" "lazygit" "tldr" "gh" "direnv"
-  "dust" "fastfetch" "ncdu"
+  "dust" "fastfetch" "ncdu" "tree-sitter-cli"
 )
 package_labels=(
   "Zsh" "Zoxide" "Fzf" "Git" "Curl" "Neovim" "Tmux" "Starship Prompt" "Ghostty Terminal"
   "Eza (ls alternative)" "Bat (cat alternative)" "Fd (find alternative)" "Ripgrep (grep alternative)"
   "Btop system monitor" "Lazygit TUI" "Tldr cheat sheets" "GitHub CLI" "Direnv env switcher"
-  "Dust (du alternative)" "Fastfetch system info" "Ncdu disk usage analyzer"
+  "Dust (du alternative)" "Fastfetch system info" "Ncdu disk usage analyzer" "Tree-sitter CLI"
 )
 package_installed=()
 package_selected=()
