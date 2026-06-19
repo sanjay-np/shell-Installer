@@ -210,14 +210,20 @@ package_installed=()
 package_selected=()
 
 # Configuration Tweaks
-configs=("zshrc" "shell" "dotfiles" "opencode")
+configs=("zshrc" "shell" "plugin_autosuggestions" "plugin_syntax_highlighting" "plugin_fzf_tab" "nvim" "ghostty" "tmux" "starship" "opencode")
 config_labels=(
   "Configure Zsh configurations in .zshrc"
   "Change default login shell to Zsh"
-  "Clone dotfiles repository & configure Neovim/Ghostty"
+  "Install zsh-autosuggestions plugin"
+  "Install zsh-syntax-highlighting plugin"
+  "Install fzf-tab plugin"
+  "Clone dotfiles & configure Neovim"
+  "Clone dotfiles & configure Ghostty"
+  "Clone dotfiles & configure tmux"
+  "Clone dotfiles & configure Starship"
   "Install/upgrade opencode.ai"
 )
-config_selected=(1 1 1 1)
+config_selected=(1 1 0 0 0 0 0 0 0 1)
 
 # Raw Key Reader (POSIX stty-compliant, compatible with Bash 3.2+)
 read_key() {
@@ -250,39 +256,16 @@ draw_header() {
   local title="$1"
   local subtitle="$2"
   
-  # Top border
-  printf "%b%s" "$TUI_BORDER" "$BOX_TL"
-  for ((i=0; i<70; i++)); do printf "%s" "$BOX_H"; done
-  printf "%s%b\e[K\n" "$BOX_TR" "$NC"
-  
-  # Title
-  local pad_t=$(( (70 - ${#title}) / 2 ))
-  printf "%b%s%b" "$TUI_BORDER" "$BOX_V" "$NC"
-  for ((i=0; i<pad_t; i++)); do printf " "; done
-  printf "%b%s%b" "$TUI_TITLE" "$title" "$NC"
-  for ((i=0; i<70 - pad_t - ${#title}; i++)); do printf " "; done
-  printf "%b%s%b\e[K\n" "$TUI_BORDER" "$BOX_V" "$NC"
-  
-  # Subtitle
+  echo ""
+  printf "  %b%s%b\e[K\n" "$TUI_TITLE" "$title" "$NC"
   if [ -n "$subtitle" ]; then
-    local pad_s=$(( (70 - ${#subtitle}) / 2 ))
-    printf "%b%s%b" "$TUI_BORDER" "$BOX_V" "$NC"
-    for ((i=0; i<pad_s; i++)); do printf " "; done
-    printf "%b%s%b" "$TUI_SUBTITLE" "$subtitle" "$NC"
-    for ((i=0; i<70 - pad_s - ${#subtitle}; i++)); do printf " "; done
-    printf "%b%s%b\e[K\n" "$TUI_BORDER" "$BOX_V" "$NC"
+    printf "  %b%s%b\e[K\n" "$TUI_SUBTITLE" "$subtitle" "$NC"
   fi
-  
-  # Divider
-  printf "%b%s" "$TUI_BORDER" "$BOX_ML"
-  for ((i=0; i<70; i++)); do printf "%s" "$BOX_H"; done
-  printf "%s%b\e[K\n" "$BOX_MR" "$NC"
+  echo ""
 }
 
 draw_footer() {
-  printf "%b%s" "$TUI_BORDER" "$BOX_BL"
-  for ((i=0; i<70; i++)); do printf "%s" "$BOX_H"; done
-  printf "%s%b\e[K\n" "$BOX_BR" "$NC"
+  printf "%b" "$NC"
 }
 
 print_menu_line() {
@@ -298,48 +281,33 @@ print_menu_line() {
     chk="$SYM_CHECKED"
   fi
   
-  # Format fixed visual widths of all components to guarantee exactly 70 columns inside the box
-  # Margins and symbols:
-  # - Left spacing (margin): 2 columns
-  # - Cursor symbol: 2 columns (e.g., "▶ " or "  ")
-  # - Checkbox: 5 columns (e.g., "[✔] " or "[ ] ")
-  # - Label (padded): 24 columns
-  # - Status (padded): 16 columns (e.g., "(Installed)     " or "(Not Installed) ")
-  # - Hardcoded spacing/padding: 21 columns
-  # Total width inside box = 2 + 2 + 5 + 24 + 16 + 21 = 70 columns!
-  
   local pad_label
-  pad_label=$(printf "%-24s" "$label")
+  pad_label=$(printf "%-32s" "$label")
   
-  local pad_status
+  local formatted_status=""
   if [ -n "$status" ]; then
-    pad_status=$(printf "%-16s" "($status)")
-  else
-    pad_status=$(printf "%-16s" "")
+    formatted_status="($status)"
   fi
   
-  # Print left border
-  printf "%b%s%b" "$TUI_BORDER" "$BOX_V" "$NC"
-  
-  # Print margins and interactive items with color formatting
+  # Print left margin (2 spaces) + cursor symbol
+  printf "  "
   if [ $is_cursor -eq 1 ]; then
-    printf "  %b%s%b " "$TUI_HIGHLIGHT" "$SYM_ARROW" "$NC"
+    printf "%b%s%b " "$TUI_HIGHLIGHT" "$SYM_ARROW" "$NC"
     if [ $is_selected -eq 1 ]; then
-      printf "%b[%s]%b %b%s%b %b%s%b" "$TUI_CHECKED" "$chk" "$NC" "$TUI_HIGHLIGHT" "$pad_label" "$NC" "$TUI_CHECKED" "$pad_status" "$NC"
+      printf "%b[%s]%b %b%s%b %b%s%b" "$TUI_CHECKED" "$chk" "$NC" "$TUI_HIGHLIGHT" "$pad_label" "$NC" "$TUI_CHECKED" "$formatted_status" "$NC"
     else
-      printf "%b[%s]%b %b%s%b %b%s%b" "$TUI_UNCHECKED" "$chk" "$NC" "$TUI_HIGHLIGHT" "$pad_label" "$NC" "$TUI_UNCHECKED" "$pad_status" "$NC"
+      printf "%b[%s]%b %b%s%b %b%s%b" "$TUI_UNCHECKED" "$chk" "$NC" "$TUI_HIGHLIGHT" "$pad_label" "$NC" "$TUI_UNCHECKED" "$formatted_status" "$NC"
     fi
   else
     printf "    "
     if [ $is_selected -eq 1 ]; then
-      printf "%b[%s]%b %s %s" "$TUI_CHECKED" "$chk" "$NC" "$pad_label" "$pad_status"
+      printf "%b[%s]%b %s %s" "$TUI_CHECKED" "$chk" "$NC" "$pad_label" "$formatted_status"
     else
-      printf "%b[%s]%b %b%s %s%b" "$TUI_UNCHECKED" "$chk" "$NC" "$TUI_DIM" "$pad_label" "$pad_status" "$NC"
+      printf "%b[%s]%b %b%s %s%b" "$TUI_UNCHECKED" "$chk" "$NC" "$TUI_DIM" "$pad_label" "$formatted_status" "$NC"
     fi
   fi
   
-  # Print exact padding and right border (visual spacing = 21 columns)
-  printf "                     %b%s%b\e[K\n" "$TUI_BORDER" "$BOX_V" "$NC"
+  printf "\e[K\n"
 }
 
 # Scrollable viewport variables
@@ -350,20 +318,15 @@ draw_step1() {
   printf "\e[H"
   draw_header "PREMIUM SHELL SETUP - STEP 1/3" "Select Packages to Install"
   
-  # 2 spaces margin + 60 visual characters + 8 padding spaces = 70 columns inside.
-  printf "%b%s%b  %s        %b%s%b\e[K\n" "$TUI_BORDER" "$BOX_V" "$NC" "Use [↑/↓] to navigate, [Space] to toggle, [Enter] to continue." "$TUI_BORDER" "$BOX_V" "$NC"
+  printf "  %s\e[K\n" "Use [↑/↓] to navigate, [Space] to toggle, [Enter] to continue."
+  echo ""
   
   # Top scroll indicator
-  local top_scroll=" "
+  local top_scroll=""
   if [ $scroll_offset -gt 0 ]; then
     top_scroll="▲ More packages above ▲"
   fi
-  local pad_ts=$(( (70 - ${#top_scroll}) / 2 ))
-  printf "%b%s%b" "$TUI_BORDER" "$BOX_V" "$NC"
-  for ((i=0; i<pad_ts; i++)); do printf " "; done
-  printf "%b%s%b" "$TUI_DIM" "$top_scroll" "$NC"
-  for ((i=0; i<70 - pad_ts - ${#top_scroll}; i++)); do printf " "; done
-  printf "%b%s%b\e[K\n" "$TUI_BORDER" "$BOX_V" "$NC"
+  printf "  %b%s%b\e[K\n" "$TUI_DIM" "$top_scroll" "$NC"
   
   # Print viewport items
   local end_idx=$((scroll_offset + view_height))
@@ -384,16 +347,11 @@ draw_step1() {
   done
   
   # Bottom scroll indicator
-  local bot_scroll=" "
+  local bot_scroll=""
   if [ $((scroll_offset + view_height)) -lt ${#packages[@]} ]; then
     bot_scroll="▼ More packages below ▼"
   fi
-  local pad_bs=$(( (70 - ${#bot_scroll}) / 2 ))
-  printf "%b%s%b" "$TUI_BORDER" "$BOX_V" "$NC"
-  for ((i=0; i<pad_bs; i++)); do printf " "; done
-  printf "%b%s%b" "$TUI_DIM" "$bot_scroll" "$NC"
-  for ((i=0; i<70 - pad_bs - ${#bot_scroll}; i++)); do printf " "; done
-  printf "%b%s%b\e[K\n" "$TUI_BORDER" "$BOX_V" "$NC"
+  printf "  %b%s%b\e[K\n" "$TUI_DIM" "$bot_scroll" "$NC"
   
   draw_footer
 }
@@ -453,9 +411,8 @@ draw_step2() {
   printf "\e[H"
   draw_header "PREMIUM SHELL SETUP - STEP 2/3" "Select Shell Configurations"
   
-  # 2 spaces margin + 65 visual characters + 3 padding spaces = 70 columns inside.
-  printf "%b%s%b  %s   %b%s%b\e[K\n" "$TUI_BORDER" "$BOX_V" "$NC" "Use [↑/↓] to navigate, [Space] to toggle, [Enter] to start install." "$TUI_BORDER" "$BOX_V" "$NC"
-  printf "%b%s%b  %-66s  %b%s%b\e[K\n" "$TUI_BORDER" "$BOX_V" "$NC" "" "$TUI_BORDER" "$BOX_V" "$NC"
+  printf "  %s\e[K\n" "Use [↑/↓] to navigate, [Space] to toggle, [Enter] to start install."
+  echo ""
   
   for ((i=0; i<${#configs[@]}; i++)); do
     local label="${config_labels[i]}"
@@ -468,11 +425,12 @@ draw_step2() {
     print_menu_line "$is_cursor" "$is_selected" "$label" ""
   done
   
-  # Pad to match Step 1 height
-  for ((p=0; p<6; p++)); do
-    printf "%b%s%b" "$TUI_BORDER" "$BOX_V" "$NC"
-    for ((s=0; s<70; s++)); do printf " "; done
-    printf "%b%s%b\e[K\n" "$TUI_BORDER" "$BOX_V" "$NC"
+  # Pad to match Step 1 height (10 lines total after header offset)
+  local used_lines=${#configs[@]}
+  local pad_lines=$(( 10 - used_lines ))
+  if [ $pad_lines -lt 0 ]; then pad_lines=0; fi
+  for ((p=0; p<pad_lines; p++)); do
+    printf "\e[K\n"
   done
   
   draw_footer
@@ -705,34 +663,59 @@ run_install_arch() {
 
 run_setup_plugins() {
   local plugin_dir="$HOME/.zsh/plugins"
-  log_info "Setting up custom Zsh plugins in $plugin_dir..."
+  
+  local chosen_plugins=()
+  if [ ${config_selected[2]} -eq 1 ]; then chosen_plugins+=("zsh-autosuggestions"); fi
+  if [ ${config_selected[3]} -eq 1 ]; then chosen_plugins+=("zsh-syntax-highlighting"); fi
+  if [ ${config_selected[4]} -eq 1 ]; then chosen_plugins+=("fzf-tab"); fi
+  
+  if [ ${#chosen_plugins[@]} -eq 0 ]; then
+    return 0
+  fi
+  
+  local joined_plugins=""
+  for item in "${chosen_plugins[@]}"; do
+    if [ -z "$joined_plugins" ]; then
+      joined_plugins="$item"
+    else
+      joined_plugins="${joined_plugins}/${item}"
+    fi
+  done
+  
+  log_info "Setting up $joined_plugins Zsh plugins in $plugin_dir..."
   mkdir -p "$plugin_dir"
 
   # zsh-autosuggestions
-  if [ ! -d "$plugin_dir/zsh-autosuggestions" ]; then
-    log_info "Cloning zsh-autosuggestions..."
-    git clone https://github.com/zsh-users/zsh-autosuggestions "$plugin_dir/zsh-autosuggestions"
-  else
-    log_info "zsh-autosuggestions exists. Pulling latest updates..."
-    git -C "$plugin_dir/zsh-autosuggestions" pull
+  if [ ${config_selected[2]} -eq 1 ]; then
+    if [ ! -d "$plugin_dir/zsh-autosuggestions" ]; then
+      log_info "Cloning zsh-autosuggestions..."
+      git clone https://github.com/zsh-users/zsh-autosuggestions "$plugin_dir/zsh-autosuggestions"
+    else
+      log_info "zsh-autosuggestions exists. Pulling latest updates..."
+      git -C "$plugin_dir/zsh-autosuggestions" pull
+    fi
   fi
 
   # zsh-syntax-highlighting
-  if [ ! -d "$plugin_dir/zsh-syntax-highlighting" ]; then
-    log_info "Cloning zsh-syntax-highlighting..."
-    git clone https://github.com/zsh-users/zsh-syntax-highlighting "$plugin_dir/zsh-syntax-highlighting"
-  else
-    log_info "zsh-syntax-highlighting exists. Pulling latest updates..."
-    git -C "$plugin_dir/zsh-syntax-highlighting" pull
+  if [ ${config_selected[3]} -eq 1 ]; then
+    if [ ! -d "$plugin_dir/zsh-syntax-highlighting" ]; then
+      log_info "Cloning zsh-syntax-highlighting..."
+      git clone https://github.com/zsh-users/zsh-syntax-highlighting "$plugin_dir/zsh-syntax-highlighting"
+    else
+      log_info "zsh-syntax-highlighting exists. Pulling latest updates..."
+      git -C "$plugin_dir/zsh-syntax-highlighting" pull
+    fi
   fi
 
   # fzf-tab
-  if [ ! -d "$plugin_dir/fzf-tab" ]; then
-    log_info "Cloning fzf-tab..."
-    git clone https://github.com/Aloxaf/fzf-tab "$plugin_dir/fzf-tab"
-  else
-    log_info "fzf-tab exists. Pulling latest updates..."
-    git -C "$plugin_dir/fzf-tab" pull
+  if [ ${config_selected[4]} -eq 1 ]; then
+    if [ ! -d "$plugin_dir/fzf-tab" ]; then
+      log_info "Cloning fzf-tab..."
+      git clone https://github.com/Aloxaf/fzf-tab "$plugin_dir/fzf-tab"
+    else
+      log_info "fzf-tab exists. Pulling latest updates..."
+      git -C "$plugin_dir/fzf-tab" pull
+    fi
   fi
 }
 
@@ -857,10 +840,25 @@ change_shell() {
 }
 
 run_setup_dotfiles() {
-  log_info "Setting up Neovim and Ghostty configurations from dotfiles repository..."
   local config_dir="$HOME/.config"
   mkdir -p "$config_dir"
 
+  local chosen_dots=()
+  if [ ${config_selected[5]} -eq 1 ]; then chosen_dots+=("Neovim"); fi
+  if [ ${config_selected[6]} -eq 1 ]; then chosen_dots+=("Ghostty"); fi
+  if [ ${config_selected[7]} -eq 1 ]; then chosen_dots+=("tmux"); fi
+  if [ ${config_selected[8]} -eq 1 ]; then chosen_dots+=("Starship"); fi
+
+  local joined_dots=""
+  for item in "${chosen_dots[@]}"; do
+    if [ -z "$joined_dots" ]; then
+      joined_dots="$item"
+    else
+      joined_dots="${joined_dots}/${item}"
+    fi
+  done
+
+  log_info "Setting up $joined_dots configurations from dotfiles repository..."
   local temp_dir
   temp_dir=$(mktemp -d)
 
@@ -868,31 +866,67 @@ run_setup_dotfiles() {
   if git clone https://github.com/sanjay-np/dotfiles "$temp_dir" >/dev/null 2>&1; then
     
     # Setup Neovim Config
-    if [ -d "$temp_dir/nvim" ]; then
-      if [ -d "$config_dir/nvim" ]; then
-        local nvim_backup="${config_dir}/nvim.bak_$(date +%Y%m%d_%H%M%S)"
-        log_info "Existing Neovim configuration found. Backing up to $nvim_backup..."
-        mv "$config_dir/nvim" "$nvim_backup"
+    if [ ${config_selected[5]} -eq 1 ]; then
+      if [ -d "$temp_dir/nvim" ]; then
+        if [ -e "$config_dir/nvim" ]; then
+          local nvim_backup="${config_dir}/nvim.bak_$(date +%Y%m%d_%H%M%S)"
+          log_info "Existing Neovim configuration found. Backing up to $nvim_backup..."
+          mv "$config_dir/nvim" "$nvim_backup"
+        fi
+        log_info "Copying Neovim configuration to $config_dir/nvim..."
+        cp -R "$temp_dir/nvim" "$config_dir/nvim"
+        log_success "Neovim configuration successfully set up!"
+      else
+        log_warning "No 'nvim' directory found in dotfiles repository."
       fi
-      log_info "Copying Neovim configuration to $config_dir/nvim..."
-      cp -R "$temp_dir/nvim" "$config_dir/nvim"
-      log_success "Neovim configuration successfully set up!"
-    else
-      log_warning "No 'nvim' directory found in dotfiles repository."
     fi
 
     # Setup Ghostty Config
-    if [ -d "$temp_dir/ghostty" ]; then
-      if [ -d "$config_dir/ghostty" ]; then
-        local ghostty_backup="${config_dir}/ghostty.bak_$(date +%Y%m%d_%H%M%S)"
-        log_info "Existing Ghostty configuration found. Backing up to $ghostty_backup..."
-        mv "$config_dir/ghostty" "$ghostty_backup"
+    if [ ${config_selected[6]} -eq 1 ]; then
+      if [ -d "$temp_dir/ghostty" ]; then
+        if [ -e "$config_dir/ghostty" ]; then
+          local ghostty_backup="${config_dir}/ghostty.bak_$(date +%Y%m%d_%H%M%S)"
+          log_info "Existing Ghostty configuration found. Backing up to $ghostty_backup..."
+          mv "$config_dir/ghostty" "$ghostty_backup"
+        fi
+        log_info "Copying Ghostty configuration to $config_dir/ghostty..."
+        cp -R "$temp_dir/ghostty" "$config_dir/ghostty"
+        log_success "Ghostty configuration successfully set up!"
+      else
+        log_warning "No 'ghostty' directory found in dotfiles repository."
       fi
-      log_info "Copying Ghostty configuration to $config_dir/ghostty..."
-      cp -R "$temp_dir/ghostty" "$config_dir/ghostty"
-      log_success "Ghostty configuration successfully set up!"
-    else
-      log_warning "No 'ghostty' directory found in dotfiles repository."
+    fi
+
+    # Setup tmux Config
+    if [ ${config_selected[7]} -eq 1 ]; then
+      if [ -d "$temp_dir/tmux" ]; then
+        if [ -e "$config_dir/tmux" ]; then
+          local tmux_backup="${config_dir}/tmux.bak_$(date +%Y%m%d_%H%M%S)"
+          log_info "Existing tmux configuration found. Backing up to $tmux_backup..."
+          mv "$config_dir/tmux" "$tmux_backup"
+        fi
+        log_info "Copying tmux configuration to $config_dir/tmux..."
+        cp -R "$temp_dir/tmux" "$config_dir/tmux"
+        log_success "tmux configuration successfully set up!"
+      else
+        log_warning "No 'tmux' directory found in dotfiles repository."
+      fi
+    fi
+
+    # Setup Starship Config
+    if [ ${config_selected[8]} -eq 1 ]; then
+      if [ -f "$temp_dir/starship.toml" ]; then
+        if [ -e "$config_dir/starship.toml" ]; then
+          local starship_backup="${config_dir}/starship.toml.bak_$(date +%Y%m%d_%H%M%S)"
+          log_info "Existing Starship configuration found. Backing up to $starship_backup..."
+          mv "$config_dir/starship.toml" "$starship_backup"
+        fi
+        log_info "Copying Starship configuration to $config_dir/starship.toml..."
+        cp "$temp_dir/starship.toml" "$config_dir/starship.toml"
+        log_success "Starship configuration successfully set up!"
+      else
+        log_warning "No 'starship.toml' file found in dotfiles repository."
+      fi
     fi
 
     rm -rf "$temp_dir"
@@ -968,10 +1002,24 @@ build_run_tasks() {
   
   # 2. Plugins Task
   run_tasks[task_idx]="plugins"
-  run_task_labels[task_idx]="Setting up custom Zsh plugins"
-  if [ ${config_selected[0]} -eq 1 ]; then
+  local selected_plugins=()
+  if [ ${config_selected[2]} -eq 1 ]; then selected_plugins+=("autosuggestions"); fi
+  if [ ${config_selected[3]} -eq 1 ]; then selected_plugins+=("syntax-highlighting"); fi
+  if [ ${config_selected[4]} -eq 1 ]; then selected_plugins+=("fzf-tab"); fi
+  
+  if [ ${#selected_plugins[@]} -gt 0 ]; then
+    local joined_plugins=""
+    for item in "${selected_plugins[@]}"; do
+      if [ -z "$joined_plugins" ]; then
+        joined_plugins="$item"
+      else
+        joined_plugins="${joined_plugins}, ${item}"
+      fi
+    done
+    run_task_labels[task_idx]="Setting up Zsh plugins: $joined_plugins"
     run_task_status[task_idx]=0
   else
+    run_task_labels[task_idx]="Setting up custom Zsh plugins"
     run_task_status[task_idx]=4
   fi
   ((task_idx++))
@@ -998,10 +1046,25 @@ build_run_tasks() {
   
   # 5. Dotfiles Task
   run_tasks[task_idx]="dotfiles"
-  run_task_labels[task_idx]="Cloning dotfiles & configuring Neovim/Ghostty"
-  if [ ${config_selected[2]} -eq 1 ]; then
+  local selected_dots=()
+  if [ ${config_selected[5]} -eq 1 ]; then selected_dots+=("Neovim"); fi
+  if [ ${config_selected[6]} -eq 1 ]; then selected_dots+=("Ghostty"); fi
+  if [ ${config_selected[7]} -eq 1 ]; then selected_dots+=("tmux"); fi
+  if [ ${config_selected[8]} -eq 1 ]; then selected_dots+=("Starship"); fi
+  
+  if [ ${#selected_dots[@]} -gt 0 ]; then
+    local joined_dots=""
+    for item in "${selected_dots[@]}"; do
+      if [ -z "$joined_dots" ]; then
+        joined_dots="$item"
+      else
+        joined_dots="${joined_dots}, ${item}"
+      fi
+    done
+    run_task_labels[task_idx]="Cloning dotfiles & configuring $joined_dots"
     run_task_status[task_idx]=0
   else
+    run_task_labels[task_idx]="Cloning dotfiles & configuring applications"
     run_task_status[task_idx]=4
   fi
   ((task_idx++))
@@ -1009,7 +1072,7 @@ build_run_tasks() {
   # 6. Opencode Task
   run_tasks[task_idx]="opencode"
   run_task_labels[task_idx]="Installing/upgrading opencode.ai"
-  if [ ${config_selected[3]} -eq 1 ]; then
+  if [ ${config_selected[9]} -eq 1 ]; then
     run_task_status[task_idx]=0
   else
     run_task_status[task_idx]=4
@@ -1053,43 +1116,21 @@ draw_step3() {
         ;;
     esac
     
-    # Format with fixed widths to ensure exact 70 columns inside the box under all circumstances
-    # Margins and symbols:
-    # - Left spacing (margin): 2 columns
-    # - Status symbol: 4 columns (e.g. "[✔] ")
-    # - Label (padded): 55 columns
-    # - Hardcoded spacing/padding: 9 columns
-    # Total width inside box = 2 + 4 + 55 + 9 = 70 columns!
-    local pad_label
-    pad_label=$(printf "%-55s" "$label")
-    
-    printf "%b%s%b  %b[%s]%b %b%s%b         %b%s%b\e[K\n" \
-      "$TUI_BORDER" "$BOX_V" "$NC" \
-      "$color" "$sym" "$NC" \
-      "$color" "$pad_label" "$NC" \
-      "$TUI_BORDER" "$BOX_V" "$NC"
+    printf "  %b[%s]%b %b%s%b\e[K\n" "$color" "$sym" "$NC" "$color" "$label"
   done
   
   # Pad tasks box to height 7 if there are fewer
-  for ((i=${#run_tasks[@]}; i<7; i++)); do
-    printf "%b%s%b" "$TUI_BORDER" "$BOX_V" "$NC"
-    for ((p=0; p<70; p++)); do printf " "; done
-    printf "%b%s%b\e[K\n" "$TUI_BORDER" "$BOX_V" "$NC"
+  local pad_t=$(( 7 - ${#run_tasks[@]} ))
+  if [ $pad_t -lt 0 ]; then pad_t=0; fi
+  for ((i=0; i<pad_t; i++)); do
+    printf "\e[K\n"
   done
   
-  # Horizontal divider
-  printf "%b%s" "$TUI_BORDER" "$BOX_ML"
-  for ((i=0; i<70; i++)); do printf "%s" "$BOX_H"; done
-  printf "%s%b\e[K\n" "$BOX_MR" "$NC"
+  echo ""
   
   # Log title
-  local log_title=" LIVE INSTALLATION LOGS (tail) "
-  local pad_l=$(( (70 - ${#log_title}) / 2 ))
-  printf "%b%s%b" "$TUI_BORDER" "$BOX_V" "$NC"
-  for ((i=0; i<pad_l; i++)); do printf " "; done
-  printf "%b%s%b" "\e[1;33m" "$log_title" "$NC"
-  for ((i=0; i<70 - pad_l - ${#log_title}; i++)); do printf " "; done
-  printf "%b%s%b\e[K\n" "$TUI_BORDER" "$BOX_V" "$NC"
+  printf "  \033[1;33mLIVE INSTALLATION LOGS (tail)\033[0m\e[K\n"
+  echo ""
   
   # Draw log lines
   local count=0
@@ -1100,13 +1141,11 @@ draw_step3() {
       local plain_line
       plain_line=$(echo "$line" | tr '\r' '\n' | tail -n 1 | sed 's/\x1B\[[0-9;]*[a-zA-Z]//g' | tr '\t' ' ')
       
-      if [ ${#plain_line} -gt 62 ]; then
-        plain_line="${plain_line:0:59}..."
+      if [ ${#plain_line} -gt 70 ]; then
+        plain_line="${plain_line:0:67}..."
       fi
-      local pad_line
-      pad_line=$(printf "%-62s" "$plain_line")
       
-      printf "%b%s%b   %b%s%b   %b%s%b\e[K\n" "$TUI_BORDER" "$BOX_V" "$NC" "$TUI_DIM" "$pad_line" "$NC" "$TUI_BORDER" "$BOX_V" "$NC"
+      printf "    %b%s%b\e[K\n" "$TUI_DIM" "$plain_line" "$NC"
       ((count++))
       if [ $count -eq 6 ]; then break; fi
     done < <(tail -n 6 "$LOG_FILE" 2>/dev/null)
@@ -1114,12 +1153,9 @@ draw_step3() {
   
   # Fill remaining log lines
   for ((i=count; i<6; i++)); do
-    printf "%b%s%b" "$TUI_BORDER" "$BOX_V" "$NC"
-    for ((p=0; p<70; p++)); do printf " "; done
-    printf "%b%s%b\e[K\n" "$TUI_BORDER" "$BOX_V" "$NC"
+    printf "\e[K\n"
   done
   
-  # Bottom border
   draw_footer
 }
 
